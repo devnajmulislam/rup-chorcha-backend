@@ -1,17 +1,22 @@
+import { toNodeHandler } from "better-auth/node";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 
 import { env } from "./config/env.js";
+import { getAuth } from "./lib/auth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFoundHandler } from "./middleware/notFound.js";
-import { globalRateLimiter } from "./middleware/rateLimiter.js";
+import {
+  authRateLimiter,
+  globalRateLimiter,
+} from "./middleware/rateLimiter.js";
 import { apiRouter } from "./routes/index.js";
 import { ApiError } from "./utils/ApiError.js";
 import { sendSuccess } from "./utils/apiResponse.js";
 
-function createApp() {
+function createApp({ auth = getAuth() } = {}) {
   const app = express();
 
   app.set("trust proxy", 1);
@@ -40,10 +45,13 @@ function createApp() {
     })
   );
 
+  // Better Auth manages its own request body parsing, so mount it before express.json().
+  app.use("/api/auth", authRateLimiter);
+  app.all("/api/auth/*splat", toNodeHandler(auth));
+
   app.use("/api", globalRateLimiter);
 
-  // Part B (Better Auth at /api/auth/*splat) and Phase 5 (Stripe webhook raw
-  // body at /api/payments/webhook) will be mounted before express.json().
+  // Phase 5 Stripe webhook raw-body route (/api/payments/webhook) will mount here before express.json().
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
   app.use(cookieParser());

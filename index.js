@@ -1,7 +1,8 @@
 import { createApp } from "./app.js";
 import { env, validateEnv } from "./config/env.js";
 import { ensureIndexes } from "./db/indexes.js";
-import { closeDB, connectDB } from "./db/mongo.js";
+import { closeDB, connectDB, getClient } from "./db/mongo.js";
+import { initAuth } from "./lib/auth.js";
 
 let server = null;
 let shuttingDown = false;
@@ -45,14 +46,24 @@ async function startServer() {
   await ensureIndexes(db);
   console.log("Verified MongoDB collection indexes.");
 
-  const app = createApp();
+  const auth = initAuth({ db, client: getClient() });
+  console.log(
+    `Configured Better Auth (Google OAuth: ${
+      env.googleOAuthConfigured
+        ? "enabled"
+        : "not configured — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
+    }).`
+  );
+
+  const app = createApp({ auth });
   server = app.listen(env.port, () => {
     console.log(`RupChorcha backend listening on port ${env.port}.`);
   });
 }
 
 startServer().catch(async (error) => {
-  const message = error instanceof Error ? error.message : "Unknown startup error";
+  const message =
+    error instanceof Error ? error.message : "Unknown startup error";
   console.error(`Backend startup failed: ${message}`);
   await closeDB().catch(() => {});
   process.exit(1);
