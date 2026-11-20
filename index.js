@@ -1,40 +1,59 @@
-import express from "express";
-import cors from "cors";
-import { MongoClient } from "mongodb";
-import "dotenv/config";
+import { createApp } from "./app.js";
+import { env, validateEnv } from "./config/env.js";
+import { ensureIndexes } from "./db/indexes.js";
+import { closeDB, connectDB } from "./db/mongo.js";
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+let server = null;
+let shuttingDown = false;
 
-app.use(cors());
-app.use(express.json());
-
-const client = new MongoClient(process.env.DB_URI);
-
-export async function connectToMongoDB() {
-  try {
-    await client.connect();
-    console.log("You successfully connected to MongoDB!");
-    return client;
-  } catch (err) {
-    console.dir(err);
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
   }
+  shuttingDown = true;
+
+  console.log(`Received ${signal}. Shutting down RupChorcha backend...`);
+
+  if (server) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  await closeDB().catch(() => {});
+  process.exit(0);
 }
 
-const connectedClient = await connectToMongoDB();
-
-const db = connectedClient.db("rup-chorcha");
-
-const usersCollection = db.collection("user");
-const servicesCollection = db.collection("services");
-const appointmentsCollection = db.collection("appointments");
-const transactionsCollection = db.collection("transactions");
-
-
-app.get("/", (req, res) => {
-  res.send("Server is OK to assist.");
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
 });
 
-app.listen(PORT, (req, res) => {
-  console.log(`The server is running on port ${PORT}.`);
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
+async function startServer() {
+  validateEnv();
+
+  if (env.usedLegacyDbUri) {
+    console.warn(
+      "[env] Using legacy DB_URI. Prefer MONGODB_URI in your backend .env file."
+    );
+  }
+
+  const db = await connectDB();
+  console.log(`Connected to MongoDB database "${db.databaseName}".`);
+
+  await ensureIndexes(db);
+  console.log("Verified MongoDB collection indexes.");
+
+  const app = createApp();
+  server = app.listen(env.port, () => {
+    console.log(`RupChorcha backend listening on port ${env.port}.`);
+  });
+}
+
+startServer().catch(async (error) => {
+  const message = error instanceof Error ? error.message : "Unknown startup error";
+  console.error(`Backend startup failed: ${message}`);
+  await closeDB().catch(() => {});
+  process.exit(1);
 });
