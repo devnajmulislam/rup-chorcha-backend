@@ -1,10 +1,14 @@
 import { z } from "zod";
 
 import {
+  ADMIN_APPOINTMENTS_DEFAULT_LIMIT,
+  ADMIN_APPOINTMENTS_MAX_LIMIT,
   APPOINTMENT_STATUSES,
   CUSTOMER_APPOINTMENTS_DEFAULT_LIMIT,
   CUSTOMER_APPOINTMENTS_MAX_LIMIT,
   MAX_APPOINTMENT_MESSAGE_LENGTH,
+  MAX_SEARCH_LENGTH,
+  PAYMENT_STATUSES,
   TIME_SLOTS,
 } from "../../config/constants.js";
 import { isValidDateString } from "../../utils/salonTime.js";
@@ -132,9 +136,108 @@ const myAppointmentsQuerySchema = z.object({
   ),
 });
 
+const paymentStatusQuerySchema = z.preprocess(
+  (val) => {
+    if (val === undefined) {
+      return undefined;
+    }
+
+    if (typeof val === "string") {
+      const trimmed = val.trim().toLowerCase();
+      if (trimmed === "" || trimmed === "all") {
+        return undefined;
+      }
+      return trimmed;
+    }
+
+    return val;
+  },
+  z
+    .enum(PAYMENT_STATUSES, {
+      error: 'Payment status filter must be "unpaid" or "paid".',
+    })
+    .optional()
+);
+
+const searchQuerySchema = z.preprocess(
+  (val) => {
+    if (val === undefined || val === null) {
+      return undefined;
+    }
+
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+
+    return val;
+  },
+  z
+    .string({ error: "Search query must be text." })
+    .max(
+      MAX_SEARCH_LENGTH,
+      `Search query must be ${MAX_SEARCH_LENGTH} characters or fewer.`
+    )
+    .optional()
+);
+
+const optionalDateFilterSchema = z.preprocess(
+  (val) => {
+    if (val === undefined || val === null) {
+      return undefined;
+    }
+
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+
+    return val;
+  },
+  z
+    .string({ error: "Appointment date filter must be text." })
+    .refine(
+      isValidDateString,
+      "Enter a valid appointment date filter in YYYY-MM-DD format."
+    )
+    .optional()
+);
+
+const adminAppointmentsQuerySchema = z.object({
+  status: appointmentStatusQuerySchema,
+  paymentStatus: paymentStatusQuerySchema,
+  search: searchQuerySchema,
+  date: optionalDateFilterSchema,
+  page: queryPositiveIntSchema(1, 10_000, "Page"),
+  limit: queryPositiveIntSchema(
+    ADMIN_APPOINTMENTS_DEFAULT_LIMIT,
+    ADMIN_APPOINTMENTS_MAX_LIMIT,
+    "Limit"
+  ),
+});
+
+const adminUpdateAppointmentStatusSchema = z
+  .object({
+    status: z.enum(["confirmed", "cancelled"], {
+      error: 'Admin status update must be "confirmed" or "cancelled".',
+    }),
+  })
+  .strict();
+
+const emptyStrictBodySchema = z.preprocess(
+  (val) => (val === undefined || val === null ? {} : val),
+  z.object({}).strict()
+);
+
 export {
+  adminAppointmentsQuerySchema,
+  adminUpdateAppointmentStatusSchema,
   appointmentIdParamSchema,
+  appointmentStatusQuerySchema,
   availabilityQuerySchema,
   createAppointmentSchema,
+  emptyStrictBodySchema,
   myAppointmentsQuerySchema,
+  queryPositiveIntSchema,
+  searchQuerySchema,
 };

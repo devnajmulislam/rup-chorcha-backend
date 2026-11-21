@@ -64,6 +64,7 @@ function getCollections() {
 
   return {
     users: db.collection("user"),
+    sessions: db.collection("session"),
     services: db.collection("services"),
     appointments: db.collection("appointments"),
     transactions: db.collection("transactions"),

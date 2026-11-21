@@ -4,7 +4,7 @@ import { ALLOWED_IMAGE_MIME_TYPES } from "../config/constants.js";
 import { env } from "../config/env.js";
 import { ApiError } from "../utils/ApiError.js";
 
-const serviceImageUpload = multer({
+const imageUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: env.maxUploadBytes,
@@ -24,7 +24,9 @@ const serviceImageUpload = multer({
   },
 });
 
-const uploadSingleServiceImage = serviceImageUpload.single("image");
+const uploadSingleImage = imageUpload.single("image");
+const uploadSingleServiceImage = uploadSingleImage;
+const uploadSingleProfileImage = uploadSingleImage;
 
 function optionalMultipartServiceImage(req, res, next) {
   if (req.is("multipart/form-data")) {
@@ -34,4 +36,9 @@ function optionalMultipartServiceImage(req, res, next) {
   return next();
 }
 
-export { optionalMultipartServiceImage, uploadSingleServiceImage };
+export {
+  optionalMultipartServiceImage,
+  uploadSingleImage,
+  uploadSingleProfileImage,
+  uploadSingleServiceImage,
+};

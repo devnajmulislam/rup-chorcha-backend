@@ -15,6 +15,7 @@ import {
   isSlotInPast,
   parseSalonDateToUtcStart,
 } from "../../utils/salonTime.js";
+import { escapeRegex } from "../../utils/validation.js";
 
 const SERVICE_SUMMARY_PROJECTION = Object.freeze({
   _id: 1,
@@ -417,11 +418,324 @@ async function cancelCustomerPendingAppointment({ customerId, appointmentId }) {
   });
 }
 
+const ADMIN_CUSTOMER_LOOKUP_STAGE = Object.freeze({
+  $lookup: {
+    from: "user",
+    let: { cid: { $toString: "$customerId" } },
+    pipeline: [
+      {
+        $match: {
+          $expr: {
+            $or: [
+              { $eq: [{ $toString: "$_id" }, "$$cid"] },
+              { $eq: ["$id", "$$cid"] },
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          id: 1,
+          name: 1,
+          email: 1,
+          phone: 1,
+          image: 1,
+          isBlocked: 1,
+        },
+      },
+    ],
+    as: "customer",
+  },
+});
+
+const ADMIN_SERVICE_LOOKUP_STAGES = Object.freeze([
+  {
+    $lookup: {
+      from: "services",
+      localField: "serviceId",
+      foreignField: "_id",
+      pipeline: [{ $project: SERVICE_SUMMARY_PROJECTION }],
+      as: "service",
+    },
+  },
+  {
+    $unwind: {
+      path: "$service",
+      preserveNullAndEmptyArrays: true,
+    },
+  },
+  ADMIN_CUSTOMER_LOOKUP_STAGE,
+  {
+    $unwind: {
+      path: "$customer",
+      preserveNullAndEmptyArrays: true,
+    },
+  },
+]);
+
+function toSafeAdminAppointment(doc) {
+  if (!doc) {
+    return null;
+  }
+
+  const base = toSafeAppointment(doc);
+  const customer =
+    doc.customer && typeof doc.customer === "object" ? doc.customer : null;
+
+  return {
+    ...base,
+    customerName:
+      typeof customer?.name === "string" && customer.name.trim()
+        ? customer.name.trim()
+        : "Unknown customer",
+    customerEmail:
+      typeof customer?.email === "string" && customer.email.trim()
+        ? customer.email.trim()
+        : "",
+    customerPhone:
+      typeof customer?.phone === "string" && customer.phone.trim()
+        ? customer.phone.trim()
+        : null,
+    customerImage:
+      typeof customer?.image === "string" && customer.image.trim()
+        ? customer.image.trim()
+        : null,
+    customerIsBlocked: customer?.isBlocked === true,
+    requestedAt: base.createdAt,
+  };
+}
+
+async function listAdminAppointments({
+  status,
+  paymentStatus,
+  search,
+  date,
+  page,
+  limit,
+}) {
+  const { appointments } = getCollections();
+  const match = {};
+
+  if (status) {
+    match.status = status;
+  }
+
+  if (paymentStatus) {
+    match.paymentStatus = paymentStatus;
+  }
+
+  if (date) {
+    match.appointmentDate = parseSalonDateToUtcStart(date);
+  }
+
+  const skip = (page - 1) * limit;
+  const pipeline = [];
+
+  if (Object.keys(match).length > 0) {
+    pipeline.push({ $match: match });
+  }
+
+  pipeline.push(...ADMIN_SERVICE_LOOKUP_STAGES);
+
+  if (search) {
+    const regex = new RegExp(escapeRegex(search), "i");
+    pipeline.push({
+      $match: {
+        $or: [
+          { "service.serviceName": regex },
+          { "customer.name": regex },
+          { "customer.email": regex },
+        ],
+      },
+    });
+  }
+
+  pipeline.push(
+    { $sort: { createdAt: -1, _id: -1 } },
+    {
+      $facet: {
+        items: [{ $skip: skip }, { $limit: limit }],
+        total: [{ $count: "count" }],
+      },
+    }
+  );
+
+  const [facetRows, statusCountsRows] = await Promise.all([
+    appointments.aggregate(pipeline).toArray(),
+    appointments
+      .aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray(),
+  ]);
+
+  const facetResult = facetRows[0] ?? { items: [], total: [] };
+  const items = (facetResult.items ?? []).map(toSafeAdminAppointment);
+  const total = facetResult.total?.[0]?.count ?? 0;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+  const counts = {
+    all: 0,
+    pending: 0,
+    confirmed: 0,
+    cancelled: 0,
+  };
+
+  for (const row of statusCountsRows) {
+    const count = Number(row.count) || 0;
+    counts.all += count;
+    if (
+      row._id === "pending" ||
+      row._id === "confirmed" ||
+      row._id === "cancelled"
+    ) {
+      counts[row._id] = count;
+    }
+  }
+
+  return {
+    items,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page * limit < total,
+      hasPrevPage: page > 1 && total > 0,
+      filters: {
+        status: status ?? null,
+        paymentStatus: paymentStatus ?? null,
+        search: search ?? null,
+        date: date ?? null,
+      },
+      counts,
+    },
+  };
+}
+
+async function getAdminAppointmentById(appointmentId) {
+  const { appointments } = getCollections();
+  const objectId = new ObjectId(appointmentId);
+
+  const rows = await appointments
+    .aggregate([{ $match: { _id: objectId } }, ...ADMIN_SERVICE_LOOKUP_STAGES])
+    .toArray();
+
+  if (!rows[0]) {
+    throw new ApiError("Appointment not found.", 404, {
+      code: "APPOINTMENT_NOT_FOUND",
+    });
+  }
+
+  return toSafeAdminAppointment(rows[0]);
+}
+
+async function confirmAdminAppointment(appointmentId) {
+  const { appointments } = getCollections();
+  const objectId = new ObjectId(appointmentId);
+
+  const updated = await appointments.findOneAndUpdate(
+    { _id: objectId, status: "pending" },
+    {
+      $set: {
+        status: "confirmed",
+        updatedAt: new Date(),
+      },
+    },
+    { returnDocument: "after" }
+  );
+
+  if (!updated) {
+    const existing = await appointments.findOne(
+      { _id: objectId },
+      { projection: { _id: 1, status: 1 } }
+    );
+
+    if (!existing) {
+      throw new ApiError("Appointment not found.", 404, {
+        code: "APPOINTMENT_NOT_FOUND",
+      });
+    }
+
+    throw new ApiError("Only pending appointments can be confirmed.", 409, {
+      code: "INVALID_STATUS_TRANSITION",
+    });
+  }
+
+  return getAdminAppointmentById(appointmentId);
+}
+
+async function cancelAdminAppointment(appointmentId) {
+  const { appointments } = getCollections();
+  const objectId = new ObjectId(appointmentId);
+
+  const updated = await appointments.findOneAndUpdate(
+    { _id: objectId, status: { $in: ACTIVE_APPOINTMENT_STATUSES } },
+    {
+      $set: {
+        status: "cancelled",
+        updatedAt: new Date(),
+      },
+    },
+    { returnDocument: "after" }
+  );
+
+  if (!updated) {
+    const existing = await appointments.findOne(
+      { _id: objectId },
+      { projection: { _id: 1, status: 1 } }
+    );
+
+    if (!existing) {
+      throw new ApiError("Appointment not found.", 404, {
+        code: "APPOINTMENT_NOT_FOUND",
+      });
+    }
+
+    throw new ApiError("This appointment is already cancelled.", 409, {
+      code: "INVALID_STATUS_TRANSITION",
+    });
+  }
+
+  return getAdminAppointmentById(appointmentId);
+}
+
+async function updateAdminAppointmentStatus({ appointmentId, status }) {
+  if (status === "confirmed") {
+    return confirmAdminAppointment(appointmentId);
+  }
+
+  if (status === "cancelled") {
+    return cancelAdminAppointment(appointmentId);
+  }
+
+  throw new ApiError(
+    'Admin status update must be "confirmed" or "cancelled".',
+    400,
+    { code: "VALIDATION_ERROR" }
+  );
+}
+
 export {
+  ADMIN_SERVICE_LOOKUP_STAGES,
+  SERVICE_SUMMARY_PROJECTION,
+  cancelAdminAppointment,
   cancelCustomerPendingAppointment,
+  confirmAdminAppointment,
   createCustomerAppointment,
+  getAdminAppointmentById,
   getCustomerAppointmentById,
   getServiceAvailabilityForCustomer,
+  listAdminAppointments,
   listCustomerAppointments,
+  toIsoTimestamp,
+  toSafeAdminAppointment,
   toSafeAppointment,
+  updateAdminAppointmentStatus,
 };

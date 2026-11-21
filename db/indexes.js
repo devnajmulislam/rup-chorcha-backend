@@ -31,6 +31,14 @@ const INDEX_DEFINITIONS = [
         name: "idx_appointments_date_slot",
       },
       {
+        key: { status: 1, createdAt: -1 },
+        name: "idx_appointments_status_created",
+      },
+      {
+        key: { customerId: 1, status: 1, appointmentDate: 1, timeSlot: 1 },
+        name: "idx_appointments_customer_status_date_slot",
+      },
+      {
         key: { customerId: 1, appointmentDate: 1, timeSlot: 1 },
         name: "uniq_appointments_customer_active_slot",
         unique: true,

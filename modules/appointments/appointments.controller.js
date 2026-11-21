@@ -2,16 +2,24 @@ import { sendSuccess } from "../../utils/apiResponse.js";
 import { parseWithSchema } from "../../utils/validation.js";
 import { serviceIdParamSchema } from "../services/services.validation.js";
 import {
+  cancelAdminAppointment,
   cancelCustomerPendingAppointment,
+  confirmAdminAppointment,
   createCustomerAppointment,
+  getAdminAppointmentById,
   getCustomerAppointmentById,
   getServiceAvailabilityForCustomer,
+  listAdminAppointments,
   listCustomerAppointments,
+  updateAdminAppointmentStatus,
 } from "./appointments.service.js";
 import {
+  adminAppointmentsQuerySchema,
+  adminUpdateAppointmentStatusSchema,
   appointmentIdParamSchema,
   availabilityQuerySchema,
   createAppointmentSchema,
+  emptyStrictBodySchema,
   myAppointmentsQuerySchema,
 } from "./appointments.validation.js";
 
@@ -107,10 +115,103 @@ async function cancelMyAppointmentHandler(req, res, next) {
   }
 }
 
+async function getAdminAppointmentsHandler(req, res, next) {
+  try {
+    const query = parseWithSchema(adminAppointmentsQuerySchema, req.query, {
+      message: "Invalid admin appointment filter query.",
+    });
+
+    const result = await listAdminAppointments(query);
+
+    return sendSuccess(res, result.items, { meta: result.meta });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getAdminAppointmentByIdHandler(req, res, next) {
+  try {
+    const { id } = parseWithSchema(appointmentIdParamSchema, req.params, {
+      message: "Invalid appointment ID.",
+      code: "INVALID_APPOINTMENT_ID",
+    });
+
+    const appointment = await getAdminAppointmentById(id);
+
+    return sendSuccess(res, appointment);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function confirmAdminAppointmentHandler(req, res, next) {
+  try {
+    const { id } = parseWithSchema(appointmentIdParamSchema, req.params, {
+      message: "Invalid appointment ID.",
+      code: "INVALID_APPOINTMENT_ID",
+    });
+    parseWithSchema(emptyStrictBodySchema, req.body, {
+      message: "Invalid confirmation request payload.",
+    });
+
+    const updated = await confirmAdminAppointment(id);
+
+    return sendSuccess(res, updated);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function cancelAdminAppointmentHandler(req, res, next) {
+  try {
+    const { id } = parseWithSchema(appointmentIdParamSchema, req.params, {
+      message: "Invalid appointment ID.",
+      code: "INVALID_APPOINTMENT_ID",
+    });
+    parseWithSchema(emptyStrictBodySchema, req.body, {
+      message: "Invalid cancellation request payload.",
+    });
+
+    const updated = await cancelAdminAppointment(id);
+
+    return sendSuccess(res, updated);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function updateAdminAppointmentStatusHandler(req, res, next) {
+  try {
+    const { id } = parseWithSchema(appointmentIdParamSchema, req.params, {
+      message: "Invalid appointment ID.",
+      code: "INVALID_APPOINTMENT_ID",
+    });
+    const { status } = parseWithSchema(
+      adminUpdateAppointmentStatusSchema,
+      req.body,
+      { message: "Invalid appointment status update payload." }
+    );
+
+    const updated = await updateAdminAppointmentStatus({
+      appointmentId: id,
+      status,
+    });
+
+    return sendSuccess(res, updated);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export {
+  cancelAdminAppointmentHandler,
   cancelMyAppointmentHandler,
+  confirmAdminAppointmentHandler,
   createAppointmentHandler,
+  getAdminAppointmentByIdHandler,
+  getAdminAppointmentsHandler,
   getMyAppointmentByIdHandler,
   getMyAppointmentsHandler,
   getServiceAvailabilityHandler,
+  updateAdminAppointmentStatusHandler,
 };
