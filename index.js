@@ -54,6 +54,13 @@ async function startServer() {
         : "not configured — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
     }).`
   );
+  console.log(
+    `Configured ImgBB uploads: ${
+      env.imgbbConfigured
+        ? `enabled (max ${env.maxUploadMb} MB)`
+        : "not configured — set IMGBB_API_KEY"
+    }.`
+  );
 
   const app = createApp({ auth });
   server = app.listen(env.port, () => {

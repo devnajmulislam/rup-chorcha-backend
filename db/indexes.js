@@ -7,6 +7,14 @@ const INDEX_DEFINITIONS = [
       { key: { price: 1 }, name: "idx_services_price" },
       { key: { serviceName: 1 }, name: "idx_services_name" },
       { key: { createdAt: -1 }, name: "idx_services_created_at" },
+      {
+        key: { status: 1, category: 1, price: 1 },
+        name: "idx_services_status_category_price",
+      },
+      {
+        key: { status: 1, createdAt: -1 },
+        name: "idx_services_status_created_at",
+      },
     ],
   },
   {

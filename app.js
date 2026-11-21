@@ -12,11 +12,11 @@ import {
   authRateLimiter,
   globalRateLimiter,
 } from "./middleware/rateLimiter.js";
-import { apiRouter } from "./routes/index.js";
+import { apiRouter, createApiRouter } from "./routes/index.js";
 import { ApiError } from "./utils/ApiError.js";
 import { sendSuccess } from "./utils/apiResponse.js";
 
-function createApp({ auth = getAuth() } = {}) {
+function createApp({ auth = getAuth(), uploadImage } = {}) {
   const app = express();
 
   app.set("trust proxy", 1);
@@ -64,7 +64,7 @@ function createApp({ auth = getAuth() } = {}) {
     });
   });
 
-  app.use("/api", apiRouter);
+  app.use("/api", uploadImage ? createApiRouter({ uploadImage }) : apiRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

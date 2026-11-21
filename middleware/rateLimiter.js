@@ -27,4 +27,12 @@ const authRateLimiter = rateLimit({
   handler: rateLimitExceededHandler,
 });
 
-export { authRateLimiter, globalRateLimiter };
+const uploadRateLimiter = rateLimit({
+  windowMs: env.uploadRateLimitWindowMs,
+  limit: env.uploadRateLimitMax,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: rateLimitExceededHandler,
+});
+
+export { authRateLimiter, globalRateLimiter, uploadRateLimiter };

@@ -38,6 +38,16 @@ const primaryMongoUri = process.env.MONGODB_URI?.trim() || "";
 const legacyDbUri = process.env.DB_URI?.trim() || "";
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+const imgbbApiKey = process.env.IMGBB_API_KEY?.trim() || "";
+const maxUploadMb = parsePositiveInt(
+  process.env.MAX_UPLOAD_MB,
+  5,
+  "MAX_UPLOAD_MB"
+);
+
+if (maxUploadMb > 20) {
+  throw new Error("MAX_UPLOAD_MB must be 20 MB or smaller.");
+}
 
 const env = Object.freeze({
   nodeEnv,
@@ -67,6 +77,20 @@ const env = Object.freeze({
     isProduction ? 60 : 300,
     "AUTH_RATE_LIMIT_MAX"
   ),
+  uploadRateLimitWindowMs: parsePositiveInt(
+    process.env.UPLOAD_RATE_LIMIT_WINDOW_MS,
+    15 * 60 * 1000,
+    "UPLOAD_RATE_LIMIT_WINDOW_MS"
+  ),
+  uploadRateLimitMax: parsePositiveInt(
+    process.env.UPLOAD_RATE_LIMIT_MAX,
+    isProduction ? 30 : 100,
+    "UPLOAD_RATE_LIMIT_MAX"
+  ),
+  imgbbApiKey,
+  imgbbConfigured: Boolean(imgbbApiKey),
+  maxUploadMb,
+  maxUploadBytes: maxUploadMb * 1024 * 1024,
   betterAuthSecret: process.env.BETTER_AUTH_SECRET?.trim() || "",
   betterAuthUrl: (
     process.env.BETTER_AUTH_URL?.trim() || `http://localhost:${port}`

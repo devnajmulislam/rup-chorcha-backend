@@ -1,10 +1,38 @@
+import multer from "multer";
+
 import { env } from "../config/env.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendError } from "../utils/apiResponse.js";
+import { formatZodIssues } from "../utils/validation.js";
 
 function errorHandler(err, _req, res, next) {
   if (res.headersSent) {
     return next(err);
+  }
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return sendError(res, {
+        statusCode: 413,
+        message: `Image size must be ${env.maxUploadMb} MB or smaller.`,
+        code: "FILE_TOO_LARGE",
+      });
+    }
+
+    return sendError(res, {
+      statusCode: 400,
+      message: "Upload a single image using the 'image' field.",
+      code: "INVALID_UPLOAD",
+    });
+  }
+
+  if (err?.name === "ZodError" && Array.isArray(err.issues)) {
+    return sendError(res, {
+      statusCode: 400,
+      message: "Validation failed.",
+      code: "VALIDATION_ERROR",
+      errors: formatZodIssues(err),
+    });
   }
 
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
