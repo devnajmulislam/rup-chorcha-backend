@@ -10,6 +10,7 @@
     "dev": "node --watch index.js",
     "start": "node index.js",
     "seed:admin": "node scripts/seed-admin.js",
+    "seed:services": "node scripts/seed-services.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js"
   },
   "keywords": [],
