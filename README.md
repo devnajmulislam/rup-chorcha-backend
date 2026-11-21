@@ -4,13 +4,14 @@ Backend REST API server for the **RupChorcha** salon appointment booking platfor
 
 ## Project Status
 
-- **Implemented (Step 1 Part A, Step 1 Part B, Step 2A, and Step 3A):**
+- **Implemented (Step 1 Part A, Step 1 Part B, Step 2A, Step 3A, and Step 4A):**
   - Express 5 application factory, environment validation, MongoDB Atlas connection & ping helper, idempotent collection index creation (`services`, `appointments`, `transactions`), Helmet security headers, credentialed CORS allowlist, global/auth/upload rate limiting, JSON/cookie/Multer parsing, `GET /api/health`, JSON 404 handler, and central JSON error handler.
   - Better Auth mounted at `/api/auth/*splat` with MongoDB adapter, email/password authentication (minimum 6 chars with uppercase & lowercase enforcement), Google OAuth env support, server-enforced `role` (`customer` default on all public sign-ups) and `isBlocked` fields, `phone` field, blocked-user session hook, `jose` HS256 JWT issuance/verification (`POST /api/jwt/token`, `GET /api/jwt/me`), `requireAuth` / `requireRole` / `requireNotBlocked` middleware, and idempotent `npm run seed:admin`.
   - Public Services API (`GET /api/services`, `GET /api/services/:id`) with active-only enforcement, escaped search, category filtering, price/name/date sorting, and skip/limit pagination.
   - Protected Admin Services API (`/api/admin/services*` with JSON and multipart support, safe hard-delete vs. soft-deactivate when referenced by appointments) and server-side ImgBB image upload endpoint (`POST /api/admin/uploads/service-image`).
   - Protected Customer Availability & Appointments API (`GET /api/services/:id/availability`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`) with `Asia/Dhaka` schedule validation (`09:00`–`18:00`, `90`-day window), server price snapshot (`pending`/`unpaid` defaults), strict ownership checks, and per-customer active-slot conflict protection (`409 DUPLICATE_APPOINTMENT_SLOT`).
-- **Planned (Upcoming Steps):** Customer/admin dashboard stats, admin appointment & user management, profile update/upload APIs, and Stripe Checkout + raw-body webhook processing.
+  - Protected Dashboard, Admin Appointment/User Management, & Profile APIs (`GET /api/dashboard/customer`, `GET /api/dashboard/admin`, `GET/PATCH /api/admin/appointments*`, `GET/PATCH /api/admin/users*` with live Better Auth session revocation, `GET/PATCH /api/profile`, and `POST /api/uploads/profile-image` via ImgBB).
+- **Planned (Upcoming Steps):** Stripe Checkout, raw-body webhook processing, and transaction endpoints (Step 5).
 
 ## Technology Stack
 
@@ -46,23 +47,40 @@ rup-chorcha-backend/
 │   │   ├── appointments.controller.js
 │   │   ├── appointments.service.js
 │   │   └── appointments.validation.js
-│   └── services/
-│       ├── services.controller.js
-│       ├── services.service.js
-│       └── services.validation.js
+│   ├── dashboard/
+│   │   ├── dashboard.controller.js
+│   │   └── dashboard.service.js
+│   ├── profile/
+│   │   ├── profile.controller.js
+│   │   ├── profile.service.js
+│   │   └── profile.validation.js
+│   ├── services/
+│   │   ├── services.controller.js
+│   │   ├── services.service.js
+│   │   └── services.validation.js
+│   └── users/
+│       ├── users.controller.js
+│       ├── users.service.js
+│       └── users.validation.js
 ├── routes/
-│   ├── admin.services.routes.js  # Admin service CRUD & status routes
-│   ├── admin.uploads.routes.js   # Admin ImgBB upload route
-│   ├── appointments.routes.js    # Customer booking, list, detail & cancel routes
-│   ├── health.routes.js          # GET /api/health
-│   ├── index.js                  # /api router mount
-│   ├── jwt.routes.js             # JWT issuance & role-verification endpoints (/api/jwt/*)
-│   └── services.routes.js        # Public service routes & customer availability (/api/services*)
+│   ├── admin.appointments.routes.js # Admin appointment list, detail, confirm & cancel
+│   ├── admin.services.routes.js     # Admin service CRUD & status routes
+│   ├── admin.uploads.routes.js      # Admin ImgBB upload route
+│   ├── admin.users.routes.js        # Admin customer directory, detail & block/unblock
+│   ├── appointments.routes.js       # Customer booking, list, detail & cancel routes
+│   ├── dashboard.routes.js          # Customer & Admin dashboard overview endpoints
+│   ├── health.routes.js             # GET /api/health
+│   ├── index.js                     # /api router mount
+│   ├── jwt.routes.js                # JWT issuance & role-verification endpoints (/api/jwt/*)
+│   ├── profile.routes.js            # Authenticated own profile read & PATCH update
+│   ├── services.routes.js           # Public service routes & customer availability (/api/services*)
+│   └── uploads.routes.js            # Authenticated profile image ImgBB upload
 ├── scripts/
 │   └── seed-admin.js       # Secure idempotent admin seeding CLI (npm run seed:admin)
 ├── tests/
-│   ├── appointments.test.js         # Step 3 appointment & availability integration tests
-│   └── services-and-uploads.test.js # Step 2A services & ImgBB integration tests
+│   ├── appointments.test.js            # Step 3 appointment & availability integration tests
+│   ├── dashboard-admin-profile.test.js # Step 4A dashboard, admin & profile integration tests
+│   └── services-and-uploads.test.js    # Step 2A services & ImgBB integration tests
 ├── utils/
 │   ├── ApiError.js         # Operational error class with HTTP status & error code
 │   ├── apiResponse.js      # Standard { success, data | message } helpers
@@ -160,6 +178,8 @@ Standard JSON contract:
 | `GET` | `/api/appointments/my` | JWT (`customer`, not blocked) | List authenticated customer's own appointments with optional status filter & pagination |
 | `GET` | `/api/appointments/my/:id` | JWT (`customer`, not blocked) | Retrieve one customer-owned appointment with service summary |
 | `PATCH` | `/api/appointments/my/:id/cancel` | JWT (`customer`, not blocked) | Cancel customer's own `pending` appointment |
+| `GET` | `/api/dashboard/customer` | JWT (`customer`, not blocked) | Authenticated customer profile, appointment stats, upcoming & recent bookings |
+| `GET` | `/api/dashboard/admin` | JWT (`admin`, not blocked) | Aggregate customer, service, appointment, recorded revenue & recent bookings |
 | `GET` | `/api/admin/services` | JWT (`admin`, not blocked) | List all services (active & inactive) with filters and pagination |
 | `POST` | `/api/admin/services` | JWT (`admin`, not blocked) | Create a service (JSON or multipart file upload) |
 | `GET` | `/api/admin/services/:id` | JWT (`admin`, not blocked) | Retrieve a service for admin editing |
@@ -167,6 +187,18 @@ Standard JSON contract:
 | `PATCH` | `/api/admin/services/:id/status` | JWT (`admin`, not blocked) | Activate or deactivate a service |
 | `DELETE` | `/api/admin/services/:id` | JWT (`admin`, not blocked) | Hard-delete unreferenced service or deactivate referenced service |
 | `POST` | `/api/admin/uploads/service-image` | JWT (`admin`, not blocked) | Validate and upload service image to ImgBB |
+| `GET` | `/api/admin/appointments` | JWT (`admin`, not blocked) | List appointments with status, payment, date, search filters & pagination |
+| `GET` | `/api/admin/appointments/:id` | JWT (`admin`, not blocked) | Retrieve full hydrated appointment details |
+| `PATCH` | `/api/admin/appointments/:id/confirm` | JWT (`admin`, not blocked) | Confirm a `pending` appointment (`pending -> confirmed`) |
+| `PATCH` | `/api/admin/appointments/:id/cancel` | JWT (`admin`, not blocked) | Cancel a `pending` or `confirmed` appointment (preserves history) |
+| `PATCH` | `/api/admin/appointments/:id/status` | JWT (`admin`, not blocked) | Update appointment status to `"confirmed"` or `"cancelled"` |
+| `GET` | `/api/admin/users` | JWT (`admin`, not blocked) | List registered customers with search, access status filter & pagination |
+| `GET` | `/api/admin/users/:id` | JWT (`admin`, not blocked) | Retrieve customer details, stats & recent appointments |
+| `PATCH` | `/api/admin/users/:id/block` | JWT (`admin`, not blocked) | Block a customer and revoke active Better Auth sessions |
+| `PATCH` | `/api/admin/users/:id/unblock` | JWT (`admin`, not blocked) | Restore access for a blocked customer |
+| `GET` | `/api/profile` | JWT (`customer` or `admin`, not blocked) | Retrieve authenticated user's safe profile |
+| `PATCH` | `/api/profile` | JWT (`customer` or `admin`, not blocked) | Update own `name`, `phone`, and/or `image` URL (strict schema) |
+| `POST` | `/api/uploads/profile-image` | JWT (`customer` or `admin`, not blocked) | Validate, upload profile image to ImgBB, and save URL on caller's account |
 
 ## Repositories & Links
 

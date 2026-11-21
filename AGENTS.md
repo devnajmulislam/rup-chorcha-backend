@@ -59,14 +59,29 @@
 - [x] Implemented `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, and `PATCH /api/appointments/my/:id/cancel` (`...protect("customer")`) enforcing active service existence, server-derived `servicePrice` snapshot (`pending`/`unpaid` defaults), future-date & past-slot validation (`400`), per-customer duplicate active slot protection via `uniq_appointments_customer_active_slot` (`409 DUPLICATE_APPOINTMENT_SLOT`, while allowing different customers on the same date+slot), strict ownership (`403 FORBIDDEN`), and pending-only cancellation (`409 INVALID_STATUS_TRANSITION`).
 - [x] Automated integration tests (`tests/appointments.test.js`) verified via `npm test` (`13/13` passed across `3` suites).
 
+### Step 4A: Express Dashboard, Admin & Profile APIs (commit `7405266`) — **COMPLETED**
+
+- [x] **Customer & Admin Dashboards (`modules/dashboard/*`, `routes/dashboard.routes.js`):**
+  - `GET /api/dashboard/customer` (`...protect("customer")`): strictly scoped to `req.user.id` (ignores client query spoofing), parallel `$group` appointment/payment counters + filtered `Asia/Dhaka` upcoming active appointments + recent 5 history items.
+  - `GET /api/dashboard/admin` (`...protect("admin")`): parallel aggregations across `user` (`active`/`blocked` customers), `services` (`active`/`inactive`), `appointments` (all status & payment counts), `transactions` (`totalRevenueCents`, `successfulPayments`, `failedPayments`, explicit `hasRecordedTransactions` flag), and recent 5 hydrated appointments.
+- [x] **Admin Appointments Management (`modules/appointments/*`, `routes/admin.appointments.routes.js`):**
+  - `GET /api/admin/appointments` (status, `paymentStatus`, `date`, regex-escaped `search`, `$facet` pagination + global `meta.counts`), `GET /api/admin/appointments/:id`, `PATCH /api/admin/appointments/:id/confirm` (`pending -> confirmed`), `PATCH /api/admin/appointments/:id/cancel` (`pending|confirmed -> cancelled`, preserves `paymentStatus` & fees/history), and `PATCH /api/admin/appointments/:id/status` (`.strict()` schema preventing `"pending"` revert or price/customer/service/payment tampering).
+- [x] **Admin User Management (`modules/users/*`, `routes/admin.users.routes.js`):**
+  - `GET /api/admin/users` (customers only `role: { $ne: "admin" }`, search across name/email/phone, `active|blocked` filter, pagination, `appointmentCount`), `GET /api/admin/users/:id` (with `appointmentStats` + recent appointments; returns `404` for admins), `PATCH /api/admin/users/:id/block`, `PATCH /api/admin/users/:id/unblock` (blocks admins/self with `403 CANNOT_BLOCK_ADMIN`, deletes Better Auth `session` docs across `ObjectId`/`string` `userId` on block, and enforces live DB `isBlocked` denial).
+- [x] **Profile & Profile Image Upload (`modules/profile/*`, `routes/profile.routes.js`, `routes/uploads.routes.js`, reused `lib/imgbb.js` & `middleware/upload.js`):**
+  - `GET /api/profile` & `PATCH /api/profile` (`...protect()`, `.strict()` Zod schema permitting only `name`, `phone`, `image`, rejecting protected fields like `role`, `isBlocked`, `email`, `password`, `id`).
+  - `POST /api/uploads/profile-image` (`...protect()`, `uploadRateLimiter`, `uploadSingleProfileImage`) reusing shared Multer + magic-byte validation + ImgBB helper and saving the HTTPS URL exclusively on `req.user.id`.
+- [x] **MongoDB Collections, Safe Projections & Indexes (`db/mongo.js`, `db/users.js`, `db/indexes.js`):** Added `sessions` collection accessor, `SAFE_USER_PROJECTION`, `buildUserCandidateIds()`, and compound indexes `idx_appointments_status_created` + `idx_appointments_customer_status_date_slot`.
+- [x] **Verification:** `node --check` passed on all `.js` files; `npm test` passed **20/20 tests across 4 suites** (`tests/dashboard-admin-profile.test.js` + existing suites); live ImgBB `POST /api/uploads/profile-image` smoke test passed (`200`, hosted URL persisted & fetched cleanly).
+
 ### Exact Next Recommended Task
 
-- **Step 4: Express Dashboard, Admin & Profile APIs + Frontend Migration** — implement `/api/dashboard/customer`, `/api/dashboard/admin`, `/api/admin/appointments*`, `/api/admin/users*` (block/unblock customers only), `/api/profile`, and `/api/uploads/profile-image` on Express, and migrate the existing `rup-chorcha` dashboard pages/actions off direct MongoDB/ImgBB access to the Express API + BFF.
+- **Step 4B: Frontend Dashboard, Admin & Profile Migration** *(in `rup-chorcha`)* — replace direct MongoDB and `IMGBB_API_KEY` usage in Customer/Admin dashboard pages, Server Actions (`src/lib/{db,admin,appointments,services}.ts`), `ProfileForm`, and `src/app/api/admin/uploads/service-image/route.ts` with authenticated Next.js BFF / server API calls targeting the Step 2A, Step 3, and Step 4A Express endpoints while preserving existing UI and deferring Stripe transactions to Step 5.
 
 ### Remaining Backend Roadmap (Upcoming Stages)
 
 - [x] **Step 3A — Appointments & Customer Availability APIs:** `GET /api/services/:id/availability`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`.
-- [ ] **Step 4A — Admin Management, Dashboard Stats & Profile APIs:** `/api/dashboard/*`, `/api/admin/appointments*`, `/api/admin/users*` (block/unblock customers only), `/api/profile`, `/api/uploads/profile-image`.
+- [x] **Step 4A — Admin Management, Dashboard Stats & Profile APIs:** `/api/dashboard/*`, `/api/admin/appointments*`, `/api/admin/users*` (block/unblock customers only), `/api/profile`, `/api/uploads/profile-image`.
 - [ ] **Step 5A — Stripe Checkout, Raw-Body Webhook & Transactions APIs:** `POST /api/payments/checkout`, raw-body `POST /api/payments/webhook` (mounted before `express.json()`), `GET /api/payments/session/:sessionId`, `/api/transactions/my`, `/api/admin/transactions` (strictly read-only).
 - [ ] **Step 6–7 — Production Hardening, Backend Commit Count Target (12+) & Deployment.**
 
@@ -158,17 +173,13 @@ All `/api/admin/services*` and `/api/admin/uploads/*` routes execute `requireAut
 
 ---
 
-## 5. Database Indexes (`services` collection)
+## 5. Database Indexes
 
 Verified idempotently by `ensureIndexes(db)` in `db/indexes.js`:
 
-- `idx_services_status`: `{ status: 1 }`
-- `idx_services_category`: `{ category: 1 }`
-- `idx_services_price`: `{ price: 1 }`
-- `idx_services_name`: `{ serviceName: 1 }`
-- `idx_services_created_at`: `{ createdAt: -1 }`
-- `idx_services_status_category_price`: `{ status: 1, category: 1, price: 1 }`
-- `idx_services_status_created_at`: `{ status: 1, createdAt: -1 }`
+- **`services`:** `idx_services_status`, `idx_services_category`, `idx_services_price`, `idx_services_name`, `idx_services_created_at`, `idx_services_status_category_price`, `idx_services_status_created_at`.
+- **`appointments`:** `idx_appointments_customer_created`, `idx_appointments_service`, `idx_appointments_status`, `idx_appointments_date_slot`, `idx_appointments_status_created` (`{ status: 1, createdAt: -1 }`), `idx_appointments_customer_status_date_slot` (`{ customerId: 1, status: 1, appointmentDate: 1, timeSlot: 1 }`), and unique partial index `uniq_appointments_customer_active_slot` (`{ customerId: 1, appointmentDate: 1, timeSlot: 1 }`, `status: { $in: ["pending", "confirmed"] }`).
+- **`transactions`:** `uniq_transactions_stripe_session`, `idx_transactions_customer_created`, `idx_transactions_appointment`, `idx_transactions_status`, `uniq_transactions_paid_appointment`.
 
 ---
 
@@ -201,11 +212,48 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 
 ## 7. Executed Verification & Known Limitations
 
-- **Syntax check:** `node --check` passed (`exit 0`) on every `.js` file in `rup-chorcha-backend`.
-- **Automated suite (`npm test` -> `node --test tests/*.test.js`):** **13/13 tests passed across 3 suites (0 failures, 0 skipped)** against real MongoDB Atlas + ephemeral Express server (`port 0`), using `uploadImageToImgBB` mock HTTP transport for upload unit/error injection tests. Includes `tests/appointments.test.js` (5 tests covering customer-only RBAC, blocked users, `Asia/Dhaka` past slots, payload spoofing, price snapshot, concurrent duplicate/overlapping `409`, multi-customer same-slot `201`, and customer list/detail/cancel/rebook). Pre-existing document `"Jhanker makeup"` (`6b008bfdeda8c9a56f80bc57`) verified unchanged, and all temporary test documents are cleaned up after runs.
-- **Live ImgBB upload verification:** `IMGBB_API_KEY` was added to local `rup-chorcha-backend/.env` and verified via `POST /api/admin/uploads/service-image` on an ephemeral Express instance loaded from current `.env` (`200 OK`, uploaded PNG returned `https://i.ibb.co/HLVv3C77/stage2b-1795238288564-5666.png`, and `GET` on that URL returned `200 image/png`).
+- **Syntax check:** `node --check` passed (`exit 0`) on every `.js` file outside `node_modules`.
+- **Automated suite (`npm test` -> `node --test tests/*.test.js`):** **20/20 tests passed across 4 suites (0 failures, 0 skipped, duration 81.9s)** against real MongoDB Atlas + ephemeral Express server (`port 0`), using `uploadImageToImgBB` mock HTTP transport for upload unit/error injection tests (`services-and-uploads.test.js`, `appointments.test.js`, and `dashboard-admin-profile.test.js`). Pre-existing document `"Jhanker makeup"` (`6b008bfdeda8c9a56f80bc57`) verified unchanged, and all temporary test users, Better Auth sessions, services, appointments, and transactions are cleaned up after runs.
+- **Live ImgBB upload verification:**
+  - Service image (`POST /api/admin/uploads/service-image`, Step 2A): `200 OK`, uploaded PNG returned `https://i.ibb.co/HLVv3C77/stage2b-1795238288564-5666.png` (`200 image/png`).
+  - Profile image (`POST /api/uploads/profile-image`, Step 4A): `200 OK`, uploaded PNG persisted on temporary customer in MongoDB and returned `https://i.ibb.co/W4sYxgLq/stage4a-profile-1795248691995.png` (`200 image/png`).
 - **Step 3 API summary (`fc3b1d8`):**
-  - `GET /api/services/:id/availability?date=YYYY-MM-DD` (`...protect("customer")`): returns `{ serviceId, date, timezone, slots, bookedSlots, pastSlots, maxAdvanceDays }`.
-  - `POST /api/appointments` (`...protect("customer")`): `.strict()` Zod body (`serviceId`, `appointmentDate`, `timeSlot`, optional `message`), active service lookup, UTC normalized salon date (`00:00:00.000+06:00`), server `servicePrice` snapshot, `pending` / `unpaid` defaults, and `uniq_appointments_customer_active_slot` (`409 DUPLICATE_APPOINTMENT_SLOT`).
-  - `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel` (`...protect("customer")`): ownership-enforced customer history (with populated service summary + filter/pagination), single-record lookup (`403 FORBIDDEN` on another customer's record), and pending-only cancellation (`409 INVALID_STATUS_TRANSITION` if confirmed/cancelled).
+  - `GET /api/services/:id/availability?date=YYYY-MM-DD`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel` (`...protect("customer")`).
 - **TypeScript / ESLint:** Not configured in `rup-chorcha-backend` (repository uses plain JavaScript ESM without TypeScript or ESLint in `package.json`).
+
+---
+
+## 8. Step 4A Specification & Frontend Migration Findings (`commit 7405266`)
+
+### Step 4A Endpoints & Authorization Rules
+
+| Method | Path | Access | Contract Summary |
+|---|---|---|---|
+| `GET` | `/api/dashboard/customer` | Customer | `{ profile, stats, upcomingAppointments, recentAppointments, timezone }`; ignores query spoofing |
+| `GET` | `/api/dashboard/admin` | Admin | `{ overview, recentAppointments, timezone }`; `hasRecordedTransactions` distinguishes unrecorded vs. zero revenue |
+| `GET` | `/api/admin/appointments` | Admin | Filter by `status`, `paymentStatus`, `date`, regex-escaped `search`, `$facet` pagination + `meta.counts` |
+| `GET` | `/api/admin/appointments/:id` | Admin | Single hydrated appointment with customer & service info (`400`/`404`) |
+| `PATCH` | `/api/admin/appointments/:id/confirm` | Admin | Strict empty body; atomic `pending -> confirmed` (`409 INVALID_STATUS_TRANSITION` otherwise) |
+| `PATCH` | `/api/admin/appointments/:id/cancel` | Admin | Strict empty body; atomic `pending\|confirmed -> cancelled`; preserves `paymentStatus` history |
+| `PATCH` | `/api/admin/appointments/:id/status` | Admin | `.strict()` `{ status: "confirmed" \| "cancelled" }`; rejects `"pending"` or extra fields (`400`) |
+| `GET` | `/api/admin/users` | Admin | Customers only (`role: { $ne: "admin" }`), `search`, `status` (`active\|blocked\|all`), pagination, `appointmentCount` |
+| `GET` | `/api/admin/users/:id` | Admin | Customer detail + `appointmentStats` + recent 5 appointments (`404` for admins) |
+| `PATCH` | `/api/admin/users/:id/block` | Admin | Blocks customer & deletes Better Auth `session` docs across ObjectId/string `userId` (`403` for admins/self) |
+| `PATCH` | `/api/admin/users/:id/unblock` | Admin | Unblocks customer & restores protected access (`403` for admins) |
+| `GET` | `/api/profile` | Authenticated | Safe own user projection (excludes `_id`, passwords, tokens) |
+| `PATCH` | `/api/profile` | Authenticated | `.strict()` `{ name?, phone?, image? }`; clears optional fields on `""`/`null`; rejects `role`/`isBlocked`/`email`/`id` |
+| `POST` | `/api/uploads/profile-image` | Authenticated | Rate-limited Multer + magic-byte ImgBB upload updating only `req.user.id` `image` field |
+
+### Dashboard Aggregations, Status Rules & Restrictions
+
+- **Customer dashboard (`modules/dashboard/dashboard.service.js`):** Single `$group` over `{ customerId: req.user.id }` plus 2 bounded queries for upcoming active appointments (filtering elapsed `Asia/Dhaka` same-day slots) and 5 recent appointments.
+- **Admin dashboard:** 5 parallel aggregations across `user` (excluding admins), `services`, `appointments`, `transactions` (summing numeric positive `amount` for `status: "paid"` and setting `hasRecordedTransactions: totalTransactions > 0`), and recent 5 appointments. No revenue is estimated from unpaid appointments.
+- **Admin cancellation:** Preserves `paymentStatus` on paid confirmed appointments; no automatic Stripe refund exists (deferred/documented limitation).
+
+### Step 4B Frontend Migration Findings (`rup-chorcha`)
+
+- **Direct MongoDB Modules to Replace:** `src/lib/db.ts`, `src/lib/admin.ts`, `src/lib/appointments.ts`, and `src/lib/services.ts`.
+- **Direct ImgBB Route to Replace:** `src/app/api/admin/uploads/service-image/route.ts` reads `process.env.IMGBB_API_KEY` directly; Step 4B should remove `IMGBB_API_KEY` from Next.js and forward authenticated Bearer JWTs to Express `POST /api/admin/uploads/service-image`.
+- **Customer Pages & Actions Migrating in Step 4B:** `src/app/(dashboard)/customer/page.tsx`, `src/app/(dashboard)/customer/appointments/page.tsx`, `src/app/(dashboard)/customer/appointments/actions.ts`, `src/app/(dashboard)/customer/profile/page.tsx`, `src/components/dashboard/AppointmentCard.tsx`, and `src/components/dashboard/ProfileForm.tsx`.
+- **Admin Pages & Actions Migrating in Step 4B:** `src/app/(dashboard)/admin/page.tsx`, `src/app/(dashboard)/admin/services/{page.tsx,actions.ts,new/page.tsx,update/page.tsx,update/[id]/page.tsx}`, `src/app/(dashboard)/admin/appointments/{page.tsx,actions.ts}`, `src/app/(dashboard)/admin/users/{page.tsx,actions.ts}`, `src/app/(dashboard)/admin/profile/page.tsx`, and `src/components/dashboard/ServiceForm.tsx`. (`src/app/(dashboard)/admin/transactions/page.tsx` and customer `getCustomerTransactions` remain pending Step 5 Stripe transaction endpoints.)
+- **Remaining Limitations:** Direct `IMGBB_API_KEY` and `MONGODB_URI` still exist in `rup-chorcha` until Step 4B removes those server helpers; if a host `node --watch` process runs in `rup-chorcha-backend`, restart it after new files/modules are added so it picks up clean routes.
