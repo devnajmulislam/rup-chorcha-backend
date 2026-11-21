@@ -4,12 +4,13 @@ Backend REST API server for the **RupChorcha** salon appointment booking platfor
 
 ## Project Status
 
-- **Implemented (Step 1 Part A, Step 1 Part B, and Step 2A):**
+- **Implemented (Step 1 Part A, Step 1 Part B, Step 2A, and Step 3A):**
   - Express 5 application factory, environment validation, MongoDB Atlas connection & ping helper, idempotent collection index creation (`services`, `appointments`, `transactions`), Helmet security headers, credentialed CORS allowlist, global/auth/upload rate limiting, JSON/cookie/Multer parsing, `GET /api/health`, JSON 404 handler, and central JSON error handler.
   - Better Auth mounted at `/api/auth/*splat` with MongoDB adapter, email/password authentication (minimum 6 chars with uppercase & lowercase enforcement), Google OAuth env support, server-enforced `role` (`customer` default on all public sign-ups) and `isBlocked` fields, `phone` field, blocked-user session hook, `jose` HS256 JWT issuance/verification (`POST /api/jwt/token`, `GET /api/jwt/me`), `requireAuth` / `requireRole` / `requireNotBlocked` middleware, and idempotent `npm run seed:admin`.
   - Public Services API (`GET /api/services`, `GET /api/services/:id`) with active-only enforcement, escaped search, category filtering, price/name/date sorting, and skip/limit pagination.
   - Protected Admin Services API (`/api/admin/services*` with JSON and multipart support, safe hard-delete vs. soft-deactivate when referenced by appointments) and server-side ImgBB image upload endpoint (`POST /api/admin/uploads/service-image`).
-- **Planned (Upcoming Steps):** Appointment booking & availability APIs, customer/admin dashboard & user management APIs, and Stripe Checkout + raw-body webhook processing.
+  - Protected Customer Availability & Appointments API (`GET /api/services/:id/availability`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`) with `Asia/Dhaka` schedule validation (`09:00`–`18:00`, `90`-day window), server price snapshot (`pending`/`unpaid` defaults), strict ownership checks, and per-customer active-slot conflict protection (`409 DUPLICATE_APPOINTMENT_SLOT`).
+- **Planned (Upcoming Steps):** Customer/admin dashboard stats, admin appointment & user management, profile update/upload APIs, and Stripe Checkout + raw-body webhook processing.
 
 ## Technology Stack
 
@@ -41,6 +42,10 @@ rup-chorcha-backend/
 │   ├── rateLimiter.js      # Global /api, auth, and upload rate limiters
 │   └── upload.js           # Multer single-image memory upload middleware
 ├── modules/
+│   ├── appointments/
+│   │   ├── appointments.controller.js
+│   │   ├── appointments.service.js
+│   │   └── appointments.validation.js
 │   └── services/
 │       ├── services.controller.js
 │       ├── services.service.js
@@ -48,18 +53,21 @@ rup-chorcha-backend/
 ├── routes/
 │   ├── admin.services.routes.js  # Admin service CRUD & status routes
 │   ├── admin.uploads.routes.js   # Admin ImgBB upload route
+│   ├── appointments.routes.js    # Customer booking, list, detail & cancel routes
 │   ├── health.routes.js          # GET /api/health
 │   ├── index.js                  # /api router mount
 │   ├── jwt.routes.js             # JWT issuance & role-verification endpoints (/api/jwt/*)
-│   └── services.routes.js        # Public service list & detail routes (/api/services*)
+│   └── services.routes.js        # Public service routes & customer availability (/api/services*)
 ├── scripts/
 │   └── seed-admin.js       # Secure idempotent admin seeding CLI (npm run seed:admin)
 ├── tests/
-│   └── services-and-uploads.test.js # Integration & unit tests (npm test)
+│   ├── appointments.test.js         # Step 3 appointment & availability integration tests
+│   └── services-and-uploads.test.js # Step 2A services & ImgBB integration tests
 ├── utils/
 │   ├── ApiError.js         # Operational error class with HTTP status & error code
 │   ├── apiResponse.js      # Standard { success, data | message } helpers
 │   ├── password.js         # Zod password rules & role normalization
+│   ├── salonTime.js        # Asia/Dhaka date/slot parsing & UTC normalization helpers
 │   └── validation.js       # Strict ObjectId check, regex escaping, Zod parser helper
 ├── .env.example            # Variable names only (never commit real .env)
 ├── AGENTS.md               # Backend architecture & roadmap tracker
@@ -147,6 +155,11 @@ Standard JSON contract:
 | `GET` | `/api/jwt/admin-check` | JWT (`admin` only, not blocked) | Role guard verification endpoint for admins |
 | `GET` | `/api/services` | Public | List active services with search, category filter, sort, and pagination |
 | `GET` | `/api/services/:id` | Public | Retrieve one active service by ID |
+| `GET` | `/api/services/:id/availability` | JWT (`customer`, not blocked) | Retrieve slot schedule, customer's booked slots, and past `Asia/Dhaka` slots for a date |
+| `POST` | `/api/appointments` | JWT (`customer`, not blocked) | Create an appointment (`pending`/`unpaid`, server price snapshot, duplicate active slot 409 guard) |
+| `GET` | `/api/appointments/my` | JWT (`customer`, not blocked) | List authenticated customer's own appointments with optional status filter & pagination |
+| `GET` | `/api/appointments/my/:id` | JWT (`customer`, not blocked) | Retrieve one customer-owned appointment with service summary |
+| `PATCH` | `/api/appointments/my/:id/cancel` | JWT (`customer`, not blocked) | Cancel customer's own `pending` appointment |
 | `GET` | `/api/admin/services` | JWT (`admin`, not blocked) | List all services (active & inactive) with filters and pagination |
 | `POST` | `/api/admin/services` | JWT (`admin`, not blocked) | Create a service (JSON or multipart file upload) |
 | `GET` | `/api/admin/services/:id` | JWT (`admin`, not blocked) | Retrieve a service for admin editing |

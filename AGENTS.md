@@ -41,7 +41,7 @@
 - [x] Route protection middleware (`requireAuth`, `requireNotBlocked`, `requireRole`, `protect`).
 - [x] Idempotent `npm run seed:admin` script.
 
-### Step 2A: Express Services APIs & ImgBB Image Upload Infrastructure — **COMPLETED**
+### Step 2A: Express Services APIs & ImgBB Image Upload Infrastructure (commits `449a45c`, `ede3cc1`, `1bf7ec6`) — **COMPLETED**
 
 - [x] Shared service constants (`config/constants.js`) matching `rup-chorcha` categories (`Haircut & Styling`, `Hair Coloring`, `Hair Treatment`, `Facial & Skincare`, `Makeup`, `Manicure & Pedicure`, `Spa & Massage`), approved image hosts, price/duration bounds, and pagination defaults.
 - [x] Public read endpoints: `GET /api/services` (active-only, search, category filter, price/name/date sort, skip/limit pagination) and `GET /api/services/:id` (active-only).
@@ -50,13 +50,22 @@
 - [x] Added safe compound `services` indexes (`idx_services_status_category_price`, `idx_services_status_created_at`) to `db/indexes.js`.
 - [x] Automated integration & unit test suite (`tests/services-and-uploads.test.js`) executed via `npm test`.
 
+### Step 3A: Express Appointments & Customer Availability APIs (commit `fc3b1d8`) — **COMPLETED**
+
+- [x] Added salon schedule & booking constants (`config/constants.js`): `SALON_TIMEZONE` (`Asia/Dhaka`), `SALON_UTC_OFFSET` (`+06:00`), `TIME_SLOTS` (`09:00`–`18:00`), `APPOINTMENT_STATUSES`, `ACTIVE_APPOINTMENT_STATUSES`, `PAYMENT_STATUSES`, `MAX_BOOKING_ADVANCE_DAYS` (`90`), `MAX_APPOINTMENT_MESSAGE_LENGTH` (`500`), and customer pagination defaults (`10` default, `50` max).
+- [x] Added `Asia/Dhaka` / UTC date conversion utilities (`utils/salonTime.js`): strict `YYYY-MM-DD` validation, current salon date/time checks, `parseSalonDateToUtcStart()` (`00:00:00.000+06:00` -> UTC), `parseSalonSlotToUtcStart()`, advance-window range checks, and `isSlotInPast()`.
+- [x] Added strict Zod validation (`modules/appointments/appointments.validation.js`): `appointmentIdParamSchema`, `availabilityQuerySchema`, `.strict()` `createAppointmentSchema` (rejects `customerId`, `servicePrice`, `status`, `paymentStatus`, or unrecognized keys), and `myAppointmentsQuerySchema`.
+- [x] Implemented `GET /api/services/:id/availability?date=YYYY-MM-DD` (`...protect("customer")`) returning `{ serviceId, date, timezone, slots, bookedSlots, pastSlots, maxAdvanceDays }`, hiding inactive services (`404`) and marking same-day elapsed slots in `Asia/Dhaka`.
+- [x] Implemented `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, and `PATCH /api/appointments/my/:id/cancel` (`...protect("customer")`) enforcing active service existence, server-derived `servicePrice` snapshot (`pending`/`unpaid` defaults), future-date & past-slot validation (`400`), per-customer duplicate active slot protection via `uniq_appointments_customer_active_slot` (`409 DUPLICATE_APPOINTMENT_SLOT`, while allowing different customers on the same date+slot), strict ownership (`403 FORBIDDEN`), and pending-only cancellation (`409 INVALID_STATUS_TRANSITION`).
+- [x] Automated integration tests (`tests/appointments.test.js`) verified via `npm test` (`13/13` passed across `3` suites).
+
 ### Exact Next Recommended Task
 
-- **Step 2B: Frontend Services & Public Pages Integration** *(in `rup-chorcha`)* — wire the Next.js home page (`/`), Browse Services (`/services`), public search/filter/sort/pagination, and admin service management UI to the new Express `/api/services*`, `/api/admin/services*`, and `/api/admin/uploads/service-image` APIs through Next.js server helpers / BFF routes.
+- **Step 4: Express Dashboard, Admin & Profile APIs + Frontend Migration** — implement `/api/dashboard/customer`, `/api/dashboard/admin`, `/api/admin/appointments*`, `/api/admin/users*` (block/unblock customers only), `/api/profile`, and `/api/uploads/profile-image` on Express, and migrate the existing `rup-chorcha` dashboard pages/actions off direct MongoDB/ImgBB access to the Express API + BFF.
 
 ### Remaining Backend Roadmap (Upcoming Stages)
 
-- [ ] **Step 3A — Appointments & Customer Availability APIs:** `GET /api/services/:id/availability`, `POST /api/appointments` (customer-only, active service check, `servicePrice` snapshot, per-customer duplicate active slot 409 guard), `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`.
+- [x] **Step 3A — Appointments & Customer Availability APIs:** `GET /api/services/:id/availability`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`.
 - [ ] **Step 4A — Admin Management, Dashboard Stats & Profile APIs:** `/api/dashboard/*`, `/api/admin/appointments*`, `/api/admin/users*` (block/unblock customers only), `/api/profile`, `/api/uploads/profile-image`.
 - [ ] **Step 5A — Stripe Checkout, Raw-Body Webhook & Transactions APIs:** `POST /api/payments/checkout`, raw-body `POST /api/payments/webhook` (mounted before `express.json()`), `GET /api/payments/session/:sessionId`, `/api/transactions/my`, `/api/admin/transactions` (strictly read-only).
 - [ ] **Step 6–7 — Production Hardening, Backend Commit Count Target (12+) & Deployment.**
@@ -192,7 +201,11 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 
 ## 7. Executed Verification & Known Limitations
 
-- **Syntax check:** `node --check` passed on every `.js` file in `rup-chorcha-backend`.
-- **Automated suite (`npm test` -> `node --test tests/*.test.js`):** **8/8 tests passed (0 failures, 0 skipped)** against real MongoDB Atlas + ephemeral Express server (`port 0`), using `uploadImageToImgBB` mock HTTP transport for unit/error injection. Pre-existing document `"Jhanker makeup"` (`6b008bfdeda8c9a56f80bc57`) verified unchanged.
-- **Live ImgBB upload verification:** `IMGBB_API_KEY` was added to local `rup-chorcha-backend/.env` and verified via `POST /api/admin/uploads/service-image` on an ephemeral Express instance loaded from current `.env` (`200 OK`, uploaded PNG returned `https://i.ibb.co/HLVv3C77/stage2b-1795238288564-5666.png`, and `GET` on that URL returned `200 image/png`). Note: any pre-existing `node --watch` host process started prior to adding `IMGBB_API_KEY` must be restarted to reload `.env`.
+- **Syntax check:** `node --check` passed (`exit 0`) on every `.js` file in `rup-chorcha-backend`.
+- **Automated suite (`npm test` -> `node --test tests/*.test.js`):** **13/13 tests passed across 3 suites (0 failures, 0 skipped)** against real MongoDB Atlas + ephemeral Express server (`port 0`), using `uploadImageToImgBB` mock HTTP transport for upload unit/error injection tests. Includes `tests/appointments.test.js` (5 tests covering customer-only RBAC, blocked users, `Asia/Dhaka` past slots, payload spoofing, price snapshot, concurrent duplicate/overlapping `409`, multi-customer same-slot `201`, and customer list/detail/cancel/rebook). Pre-existing document `"Jhanker makeup"` (`6b008bfdeda8c9a56f80bc57`) verified unchanged, and all temporary test documents are cleaned up after runs.
+- **Live ImgBB upload verification:** `IMGBB_API_KEY` was added to local `rup-chorcha-backend/.env` and verified via `POST /api/admin/uploads/service-image` on an ephemeral Express instance loaded from current `.env` (`200 OK`, uploaded PNG returned `https://i.ibb.co/HLVv3C77/stage2b-1795238288564-5666.png`, and `GET` on that URL returned `200 image/png`).
+- **Step 3 API summary (`fc3b1d8`):**
+  - `GET /api/services/:id/availability?date=YYYY-MM-DD` (`...protect("customer")`): returns `{ serviceId, date, timezone, slots, bookedSlots, pastSlots, maxAdvanceDays }`.
+  - `POST /api/appointments` (`...protect("customer")`): `.strict()` Zod body (`serviceId`, `appointmentDate`, `timeSlot`, optional `message`), active service lookup, UTC normalized salon date (`00:00:00.000+06:00`), server `servicePrice` snapshot, `pending` / `unpaid` defaults, and `uniq_appointments_customer_active_slot` (`409 DUPLICATE_APPOINTMENT_SLOT`).
+  - `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel` (`...protect("customer")`): ownership-enforced customer history (with populated service summary + filter/pagination), single-record lookup (`403 FORBIDDEN` on another customer's record), and pending-only cancellation (`409 INVALID_STATUS_TRANSITION` if confirmed/cancelled).
 - **TypeScript / ESLint:** Not configured in `rup-chorcha-backend` (repository uses plain JavaScript ESM without TypeScript or ESLint in `package.json`).
