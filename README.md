@@ -4,20 +4,22 @@ Backend REST API server for the **RupChorcha** salon appointment booking platfor
 
 ## Project Status
 
-- **Implemented (Step 1 Part A, Step 1 Part B, Step 2A, Step 3A, and Step 4A):**
-  - Express 5 application factory, environment validation, MongoDB Atlas connection & ping helper, idempotent collection index creation (`services`, `appointments`, `transactions`), Helmet security headers, credentialed CORS allowlist, global/auth/upload rate limiting, JSON/cookie/Multer parsing, `GET /api/health`, JSON 404 handler, and central JSON error handler.
+- **Implemented (Step 1 Part A, Step 1 Part B, Step 2A, Step 3A, Step 4A, and Step 5A):**
+  - Express 5 application factory, environment validation, MongoDB Atlas connection & ping helper, idempotent collection index creation (`services`, `appointments`, `transactions`), Helmet security headers, credentialed CORS allowlist, global/auth/upload/checkout rate limiting, JSON/cookie/Multer/Stripe raw-body parsing, `GET /api/health`, JSON 404 handler, and central JSON error handler.
   - Better Auth mounted at `/api/auth/*splat` with MongoDB adapter, email/password authentication (minimum 6 chars with uppercase & lowercase enforcement), Google OAuth env support, server-enforced `role` (`customer` default on all public sign-ups) and `isBlocked` fields, `phone` field, blocked-user session hook, `jose` HS256 JWT issuance/verification (`POST /api/jwt/token`, `GET /api/jwt/me`), `requireAuth` / `requireRole` / `requireNotBlocked` middleware, and idempotent `npm run seed:admin`.
   - Public Services API (`GET /api/services`, `GET /api/services/:id`) with active-only enforcement, escaped search, category filtering, price/name/date sorting, and skip/limit pagination.
   - Protected Admin Services API (`/api/admin/services*` with JSON and multipart support, safe hard-delete vs. soft-deactivate when referenced by appointments) and server-side ImgBB image upload endpoint (`POST /api/admin/uploads/service-image`).
   - Protected Customer Availability & Appointments API (`GET /api/services/:id/availability`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`) with `Asia/Dhaka` schedule validation (`09:00`–`18:00`, `90`-day window), server price snapshot (`pending`/`unpaid` defaults), strict ownership checks, and per-customer active-slot conflict protection (`409 DUPLICATE_APPOINTMENT_SLOT`).
   - Protected Dashboard, Admin Appointment/User Management, & Profile APIs (`GET /api/dashboard/customer`, `GET /api/dashboard/admin`, `GET/PATCH /api/admin/appointments*`, `GET/PATCH /api/admin/users*` with live Better Auth session revocation, `GET/PATCH /api/profile`, and `POST /api/uploads/profile-image` via ImgBB).
-- **Planned (Upcoming Steps):** Stripe Checkout, raw-body webhook processing, and transaction endpoints (Step 5).
+  - Stripe Checkout, Verified Raw-Body Webhook & Read-Only Transaction Ledger APIs (`POST /api/payments/checkout`, `POST /api/payments/webhook`, `GET /api/payments/session/:sessionId`, `GET /api/transactions/my`, `GET /api/admin/transactions`).
+- **Planned (Upcoming Steps):** Frontend Step 5B payment UI integration (`rup-chorcha`), Step 6 polish/QA, and Step 7 deployment.
 
 ## Technology Stack
 
 - **Runtime:** Node.js (`>=20.19.0`), JavaScript ESM
 - **Framework:** Express `5.3.0`
 - **Database:** MongoDB native driver (`mongodb` `7.9.0`) targeting database `rup-chorcha`
+- **Payments:** `stripe` (`^23.2.0`) Checkout Sessions + raw-body webhook signature verification
 - **Authentication, JWT & Validation:** `better-auth`, `@better-auth/mongo-adapter`, `jose` (HS256 JWT), `zod`
 - **Uploads & Security Middleware:** `multer` (memory storage + magic-byte validation), ImgBB API integration, `helmet`, `cors`, `express-rate-limit`, `cookie-parser`, `dotenv`
 
@@ -27,7 +29,8 @@ Backend REST API server for the **RupChorcha** salon appointment booking platfor
 rup-chorcha-backend/
 ├── config/
 │   ├── constants.js        # Shared categories, sort options, image hosts, pagination & limits
-│   └── env.js              # Environment parsing and fail-fast validation
+│   ├── env.js              # Environment parsing and fail-fast validation
+│   └── stripe.js           # Lazy Stripe SDK client & raw-body webhook signature helper
 ├── db/
 │   ├── indexes.js          # Idempotent MongoDB indexes for business collections
 │   ├── mongo.js            # Singleton MongoClient, Db handle, ping, and collections
@@ -50,6 +53,10 @@ rup-chorcha-backend/
 │   ├── dashboard/
 │   │   ├── dashboard.controller.js
 │   │   └── dashboard.service.js
+│   ├── payments/
+│   │   ├── payments.controller.js
+│   │   ├── payments.service.js
+│   │   └── payments.validation.js
 │   ├── profile/
 │   │   ├── profile.controller.js
 │   │   ├── profile.service.js
@@ -65,6 +72,7 @@ rup-chorcha-backend/
 ├── routes/
 │   ├── admin.appointments.routes.js # Admin appointment list, detail, confirm & cancel
 │   ├── admin.services.routes.js     # Admin service CRUD & status routes
+│   ├── admin.transactions.routes.js # Read-only admin transaction ledger routes
 │   ├── admin.uploads.routes.js      # Admin ImgBB upload route
 │   ├── admin.users.routes.js        # Admin customer directory, detail & block/unblock
 │   ├── appointments.routes.js       # Customer booking, list, detail & cancel routes
@@ -72,14 +80,17 @@ rup-chorcha-backend/
 │   ├── health.routes.js             # GET /api/health
 │   ├── index.js                     # /api router mount
 │   ├── jwt.routes.js                # JWT issuance & role-verification endpoints (/api/jwt/*)
+│   ├── payments.routes.js           # Stripe Checkout creation & session status lookup
 │   ├── profile.routes.js            # Authenticated own profile read & PATCH update
 │   ├── services.routes.js           # Public service routes & customer availability (/api/services*)
+│   ├── transactions.routes.js       # Authenticated customer transaction history
 │   └── uploads.routes.js            # Authenticated profile image ImgBB upload
 ├── scripts/
 │   └── seed-admin.js       # Secure idempotent admin seeding CLI (npm run seed:admin)
 ├── tests/
 │   ├── appointments.test.js            # Step 3 appointment & availability integration tests
 │   ├── dashboard-admin-profile.test.js # Step 4A dashboard, admin & profile integration tests
+│   ├── payments.test.js                # Step 5A Stripe Checkout, webhook & transactions tests
 │   └── services-and-uploads.test.js    # Step 2A services & ImgBB integration tests
 ├── utils/
 │   ├── ApiError.js         # Operational error class with HTTP status & error code
@@ -149,9 +160,25 @@ Names only — never commit real credentials or secrets to version control.
 - `ADMIN_EMAIL` — Seeded administrator email (for `npm run seed:admin`)
 - `ADMIN_PASSWORD` — Seeded administrator password (must meet password rules)
 - `ADMIN_NAME` — Seeded administrator display name (optional, default: `RupChorcha Admin`)
-- `STRIPE_SECRET_KEY` *(Phase 5)* — Stripe secret API key
-- `STRIPE_WEBHOOK_SECRET` *(Phase 5)* — Stripe webhook signing secret
-- `STRIPE_CURRENCY` *(Phase 5)* — Currency code (`usd`)
+- `STRIPE_SECRET_KEY` *(Step 5A)* — Server-only Stripe secret API key (`sk_test_...` / `sk_live_...` / `rk_...`)
+- `STRIPE_PUBLISHABLE_KEY` *(Step 5A, optional on server)* — Stripe publishable key (`pk_test_...` / `pk_live_...`)
+- `STRIPE_WEBHOOK_SECRET` *(Step 5A)* — Stripe webhook signing secret (`whsec_...`)
+- `STRIPE_CURRENCY` *(Step 5A, optional)* — Lowercase Stripe Checkout currency (`usd`)
+- `CHECKOUT_RATE_LIMIT_WINDOW_MS`, `CHECKOUT_RATE_LIMIT_MAX` *(Step 5A, optional)* — Checkout rate-limit window and cap
+- `CLIENT_APP_URL` *(Step 5A, optional)* — Frontend base URL override for Stripe `success_url` / `cancel_url` (defaults to `CLIENT_URL`)
+
+## Local Stripe Webhook Testing (Stripe CLI)
+
+1. Install the Stripe CLI on Windows (e.g., `winget install Stripe.StripeCli` or via Scoop) and verify with `stripe --version`.
+2. Authenticate the CLI in your Stripe account (`stripe login`).
+3. Start listening and forwarding webhooks to the local backend:
+   ```bash
+   stripe listen --forward-to http://localhost:5000/api/payments/webhook
+   ```
+4. Copy the printed webhook signing secret (`whsec_...`) into `rup-chorcha-backend/.env` as `STRIPE_WEBHOOK_SECRET`, restart the backend (`npm run dev`), and test with:
+   ```bash
+   stripe trigger checkout.session.completed
+   ```
 - `IMGBB_API_KEY` *(Step 2A)* — Server-only ImgBB upload API key
 - `MAX_UPLOAD_MB` *(Step 2A, optional)* — Max image upload size in MB (default: `5`)
 
@@ -199,6 +226,11 @@ Standard JSON contract:
 | `GET` | `/api/profile` | JWT (`customer` or `admin`, not blocked) | Retrieve authenticated user's safe profile |
 | `PATCH` | `/api/profile` | JWT (`customer` or `admin`, not blocked) | Update own `name`, `phone`, and/or `image` URL (strict schema) |
 | `POST` | `/api/uploads/profile-image` | JWT (`customer` or `admin`, not blocked) | Validate, upload profile image to ImgBB, and save URL on caller's account |
+| `POST` | `/api/payments/checkout` | JWT (`customer`, not blocked, rate-limited) | Create or reuse Stripe Checkout Session for an eligible confirmed unpaid appointment |
+| `POST` | `/api/payments/webhook` | Stripe `Stripe-Signature` (raw Buffer body) | Verify Stripe event signature and idempotently record paid/failed outcomes |
+| `GET` | `/api/payments/session/:sessionId` | JWT (`customer` owner, not blocked) | Read-only payment session and linked appointment status lookup |
+| `GET` | `/api/transactions/my` | JWT (`customer`, not blocked) | Paginated payment history scoped to the authenticated customer |
+| `GET` | `/api/admin/transactions` | JWT (`admin`, not blocked) | Strictly read-only admin transaction ledger with status, search, pagination & totals |
 
 ## Repositories & Links
 

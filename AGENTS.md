@@ -81,15 +81,15 @@
 
 ### Exact Next Recommended Task
 
-- **Step 5: Stripe Checkout, Verified Webhook & Payment Pages** — implement `POST /api/payments/checkout`, raw-body `POST /api/payments/webhook` (mounted before `express.json()`), `GET /api/payments/session/:sessionId`, `GET /api/transactions/my`, and `GET /api/admin/transactions` in `rup-chorcha-backend` (Step 5A), then integrate Next.js Pay Now, `/payment/success`, `/payment/cancel`, Customer Payments tab, and Admin `/admin/transactions` while removing `src/lib/db.ts` and `src/lib/transactions-legacy.ts` from `rup-chorcha` (Step 5B).
+- **Step 5B: Frontend Payment Integration & Legacy DB Cleanup (`rup-chorcha`)** — wire Pay Now (`POST /api/payments/checkout`), `/payment/success` (polling `/api/payments/session/:sessionId`), `/payment/cancel`, Customer Payments tab (`GET /api/transactions/my`), and Admin `/admin/transactions` (`GET /api/admin/transactions`) via Next.js BFF/server helpers, and remove `src/lib/db.ts`, `src/lib/transactions-legacy.ts`, `mongodb`, and `MONGODB_URI` from `rup-chorcha` after explicit user approval.
 
 ### Remaining Backend Roadmap (Upcoming Stages)
 
 - [x] **Step 3A — Appointments & Customer Availability APIs:** `GET /api/services/:id/availability`, `POST /api/appointments`, `GET /api/appointments/my`, `GET /api/appointments/my/:id`, `PATCH /api/appointments/my/:id/cancel`.
 - [x] **Step 4A — Admin Management, Dashboard Stats & Profile APIs:** `/api/dashboard/*`, `/api/admin/appointments*`, `/api/admin/users*` (block/unblock customers only), `/api/profile`, `/api/uploads/profile-image`.
 - [x] **Step 4B — Frontend Dashboard, Admin & Profile Migration *(in `rup-chorcha`)*:** End-to-end verified (`12/12`) against this backend.
-- [ ] **Step 5A — Stripe Checkout, Raw-Body Webhook & Transactions APIs:** `POST /api/payments/checkout`, raw-body `POST /api/payments/webhook` (mounted before `express.json()`), `GET /api/payments/session/:sessionId`, `/api/transactions/my`, `/api/admin/transactions` (strictly read-only).
-- [ ] **Step 6–7 — Production Hardening, Backend Commit Count Target (12+) & Deployment.**
+- [x] **Step 5A — Stripe Checkout, Raw-Body Webhook & Transactions APIs:** `POST /api/payments/checkout`, raw-body `POST /api/payments/webhook` (mounted before `globalRateLimiter` & `express.json()`), `GET /api/payments/session/:sessionId`, `GET /api/transactions/my`, and strictly read-only `GET /api/admin/transactions`.
+- [ ] **Step 6–7 — Production Hardening, Live Stripe Webhook Verification & Deployment.**
 
 ---
 
@@ -185,7 +185,7 @@ Verified idempotently by `ensureIndexes(db)` in `db/indexes.js`:
 
 - **`services`:** `idx_services_status`, `idx_services_category`, `idx_services_price`, `idx_services_name`, `idx_services_created_at`, `idx_services_status_category_price`, `idx_services_status_created_at`.
 - **`appointments`:** `idx_appointments_customer_created`, `idx_appointments_service`, `idx_appointments_status`, `idx_appointments_date_slot`, `idx_appointments_status_created` (`{ status: 1, createdAt: -1 }`), `idx_appointments_customer_status_date_slot` (`{ customerId: 1, status: 1, appointmentDate: 1, timeSlot: 1 }`), and unique partial index `uniq_appointments_customer_active_slot` (`{ customerId: 1, appointmentDate: 1, timeSlot: 1 }`, `status: { $in: ["pending", "confirmed"] }`).
-- **`transactions`:** `uniq_transactions_stripe_session`, `idx_transactions_customer_created`, `idx_transactions_appointment`, `idx_transactions_status`, `uniq_transactions_paid_appointment`.
+- **`transactions`:** `uniq_transactions_stripe_session`, `idx_transactions_customer_created`, `idx_transactions_appointment`, `idx_transactions_status`, `uniq_transactions_paid_appointment`, `uniq_transactions_pending_appointment` (unique `{ appointmentId: 1 }` where `status: "pending"`), and `idx_transactions_created_at` (`{ createdAt: -1 }`).
 
 ---
 
@@ -198,6 +198,7 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 | `PORT` | Optional | `5000` | Express server port |
 | `NODE_ENV` | Optional | `development` | Environment (`development` / `production`) |
 | `CLIENT_URL` | Required in prod | `http://localhost:3000` (dev) | Comma-separated allowed CORS origins |
+| `CLIENT_APP_URL` | Optional | `CLIENT_URL[0]` or `http://localhost:3000` | Canonical frontend origin for Stripe `success_url` / `cancel_url` |
 | `MONGODB_URI` | Required | — | MongoDB Atlas connection string (`DB_URI` fallback supported) |
 | `MONGODB_DB_NAME` | Optional | `rup-chorcha` | Target MongoDB database name |
 | `BETTER_AUTH_SECRET` | Required | — | Better Auth session/state secret (`>=32` chars) |
@@ -209,17 +210,23 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional | — | Enables Google OAuth in Better Auth when both set |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Seed CLI | `RupChorcha Admin` | Admin provisioning via `npm run seed:admin` |
 | `IMGBB_API_KEY` | Required for upload | — | Server-side ImgBB API key (`503` on upload if unset) |
-| `MAX_UPLOAD_MB` | Optional | `5` | Maximum service image upload size in MB (max `20`) |
-| `UPLOAD_RATE_LIMIT_WINDOW_MS` | Optional | `900000` | Upload endpoint rate-limit window (ms) |
-| `UPLOAD_RATE_LIMIT_MAX` | Optional | `100` dev / `30` prod | Upload endpoint rate limit per window |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CURRENCY` | Phase 5 | `usd` | Reserved for Step 5 Stripe Checkout & webhooks |
+| `MAX_UPLOAD_MB` | Optional | `5` | Maximum image upload size in MB (max `20`) |
+| `UPLOAD_RATE_LIMIT_WINDOW_MS`, `UPLOAD_RATE_LIMIT_MAX` | Optional | `900000` / `100` dev (`30` prod) | Upload endpoint rate-limit window & cap |
+| `STRIPE_SECRET_KEY` | Required for Checkout | — | Server-only Stripe secret API key (`sk_test_...` / `sk_live_...` / `rk_...`) |
+| `STRIPE_PUBLISHABLE_KEY` | Optional on server | — | Stripe publishable key (`pk_test_...` / `pk_live_...`); validated format if present |
+| `STRIPE_WEBHOOK_SECRET` | Required for webhooks | — | Stripe webhook signing secret (`whsec_...`) for raw-body signature verification |
+| `STRIPE_CURRENCY` | Optional | `usd` | Enforced lowercase Stripe Checkout currency (`usd`) |
+| `CHECKOUT_RATE_LIMIT_WINDOW_MS`, `CHECKOUT_RATE_LIMIT_MAX` | Optional | `900000` / `100` dev (`30` prod) | Checkout endpoint rate-limit window & cap |
 
 ---
 
 ## 7. Executed Verification & Known Limitations
 
 - **Syntax check:** `node --check` passed (`exit 0`) on every `.js` file outside `node_modules`.
-- **Automated suite (`npm test` -> `node --test tests/*.test.js`):** **20/20 tests passed across 4 suites (0 failures, 0 skipped, duration 81.9s)** against real MongoDB Atlas + ephemeral Express server (`port 0`), using `uploadImageToImgBB` mock HTTP transport for upload unit/error injection tests (`services-and-uploads.test.js`, `appointments.test.js`, and `dashboard-admin-profile.test.js`). Pre-existing document `"Jhanker makeup"` (`6b008bfdeda8c9a56f80bc57`) verified unchanged, and all temporary test users, Better Auth sessions, services, appointments, and transactions are cleaned up after runs.
+- **Automated suite (`npm test` -> `node --test --test-concurrency=1 tests/*.test.js`):** **24/24 tests passed across 5 suites (0 failures, 0 skipped, duration 53.6s)** against real MongoDB Atlas + ephemeral Express servers (`services-and-uploads.test.js`, `appointments.test.js`, `dashboard-admin-profile.test.js`, and `payments.test.js`). Pre-existing document `"Jhanker makeup"` (`6b008bfdeda8c9a56f80bc57`) verified unchanged, and all temporary test users, sessions, services, appointments, transactions, and live Stripe Checkout Sessions were cleaned up/expired after execution.
+- **Live Stripe Test-Mode Checkout (`tests/payments.test.js`):** Real `stripe.checkout.sessions.create`, open-session reuse, real `stripe.checkout.sessions.retrieve`, real `stripe.checkout.sessions.expire`, and fresh retry creation executed cleanly against Stripe test mode using `STRIPE_SECRET_KEY`.
+- **Cryptographic Webhook Verification (`tests/payments.test.js`):** Raw-body `Stripe.webhooks.generateTestHeaderString` + `stripe.webhooks.constructEvent` verified signature rejection (`missing`/`invalid`/`tampered`), `checkout.session.completed` (`paid` vs async `unpaid`), idempotent duplicate event handling, `checkout.session.expired`, `checkout.session.async_payment_failed`, `checkout.session.async_payment_succeeded`, and protection against paying pending/cancelled appointments.
+- **Stripe CLI Limitation / Manual Check:** `stripe` CLI is not installed on this Windows workstation and `STRIPE_WEBHOOK_SECRET` is blank in the local `.env`. Install Stripe CLI and run `stripe listen --forward-to http://localhost:5000/api/payments/webhook`, place the generated `whsec_...` into backend `.env` as `STRIPE_WEBHOOK_SECRET`, and trigger live Stripe CLI webhook tests locally.
 - **Live ImgBB upload verification:**
   - Service image (`POST /api/admin/uploads/service-image`, Step 2A): `200 OK`, uploaded PNG returned `https://i.ibb.co/HLVv3C77/stage2b-1795238288564-5666.png` (`200 image/png`).
   - Profile image (`POST /api/uploads/profile-image`, Step 4A): `200 OK`, uploaded PNG persisted on temporary customer in MongoDB and returned `https://i.ibb.co/W4sYxgLq/stage4a-profile-1795248691995.png` (`200 image/png`).
@@ -229,9 +236,9 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 
 ---
 
-## 8. Step 4A Specification & Frontend Migration Findings (`commit 7405266`)
+## 8. Step 4A & Step 5A Specifications
 
-### Step 4A Endpoints & Authorization Rules
+### Step 4A Endpoints & Authorization Rules (`commit 7405266`)
 
 | Method | Path | Access | Contract Summary |
 |---|---|---|---|
@@ -262,4 +269,37 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 - **Direct ImgBB Route to Replace:** `src/app/api/admin/uploads/service-image/route.ts` reads `process.env.IMGBB_API_KEY` directly; Step 4B should remove `IMGBB_API_KEY` from Next.js and forward authenticated Bearer JWTs to Express `POST /api/admin/uploads/service-image`.
 - **Customer Pages & Actions Migrating in Step 4B:** `src/app/(dashboard)/customer/page.tsx`, `src/app/(dashboard)/customer/appointments/page.tsx`, `src/app/(dashboard)/customer/appointments/actions.ts`, `src/app/(dashboard)/customer/profile/page.tsx`, `src/components/dashboard/AppointmentCard.tsx`, and `src/components/dashboard/ProfileForm.tsx`.
 - **Admin Pages & Actions Migrating in Step 4B:** `src/app/(dashboard)/admin/page.tsx`, `src/app/(dashboard)/admin/services/{page.tsx,actions.ts,new/page.tsx,update/page.tsx,update/[id]/page.tsx}`, `src/app/(dashboard)/admin/appointments/{page.tsx,actions.ts}`, `src/app/(dashboard)/admin/users/{page.tsx,actions.ts}`, `src/app/(dashboard)/admin/profile/page.tsx`, and `src/components/dashboard/ServiceForm.tsx`. (`src/app/(dashboard)/admin/transactions/page.tsx` and customer `getCustomerTransactions` remain pending Step 5 Stripe transaction endpoints.)
-- **Step 4B Verification Status (`rup-chorcha`):** Customer/Admin dashboards, service/appointment/user management, `/api/auth/profile` (`GET`/`PATCH`), `/api/backend/uploads/profile-image`, and `/api/admin/uploads/service-image` now call Express `Step 2A`, `Step 3`, and `Step 4A` endpoints via authenticated Bearer JWTs and BFF proxies. `Step 4B` end-to-end integration passed `12/12` checks against this backend (including live ImgBB service/profile uploads, blocked-user denial, and fail-closed backend-unavailable handling). Remaining frontend direct MongoDB access is strictly isolated to `src/lib/db.ts` + `src/lib/transactions-legacy.ts` pending Step 5 (`Stripe Checkout` & `/api/transactions/*`). Interactive headless Chrome UI click-through remains pending manual verification due to unavailable `chrome_devtools` MCP (`DevToolsActivePort`). If a host `node --watch` process runs in `rup-chorcha-backend`, restart it after new files/modules are added so it picks up clean routes.
+- **Step 4B Verification Status (`rup-chorcha`):** Customer/Admin dashboards, service/appointment/user management, `/api/auth/profile` (`GET`/`PATCH`), `/api/backend/uploads/profile-image`, and `/api/admin/uploads/service-image` now call Express `Step 2A`, `Step 3`, and `Step 4A` endpoints via authenticated Bearer JWTs and BFF proxies.
+
+---
+
+## 9. Step 5A Payment Architecture & API Specification
+
+### Payment & Transaction Lifecycle (`modules/payments/*`)
+
+- **Allowed Transaction Statuses:** `"pending"` | `"paid"` | `"failed"`.
+- **Checkout (`POST /api/payments/checkout`):**
+  - Runs `checkoutRateLimiter` -> `requireAuth` -> `requireNotBlocked` -> `requireRole("customer")`.
+  - `.strict()` Zod schema accepts `{ appointmentId }` only; rejects any client-supplied `amount`, `price`, `servicePrice`, `currency`, `customerId`, `status`, `paymentStatus`, or redirect URLs (`400 VALIDATION_ERROR`).
+  - Verifies ownership (`403`), eligible state (`confirmed` and `unpaid`, else `409 APPOINTMENT_NOT_CONFIRMED` / `APPOINTMENT_CANCELLED` / `APPOINTMENT_ALREADY_PAID`), and server-computed USD cents (`appointment.servicePrice` snapshot verified against `services`, `MIN_STRIPE_AMOUNT_CENTS = 50`).
+  - Prevents duplicate active checkout sessions: reuses open active Stripe sessions (`200`, `reused: true`), transitions expired remote sessions to `"failed"` (`session_expired`) before creating a replacement session (`201`), and uses unique partial index `uniq_transactions_pending_appointment` + Stripe `idempotencyKey` (`checkout_<transactionId>`) to block parallel race duplicates (`409 CHECKOUT_IN_PROGRESS`).
+  - Redirect URLs: `${env.clientBaseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}` and `${env.clientBaseUrl}/payment/cancel?appointmentId=<id>`.
+- **Verified Raw-Body Webhook (`POST /api/payments/webhook`):**
+  - Mounted in `app.js` **before** `globalRateLimiter` and **before** `express.json()` using `express.raw({ type: "application/json", limit: "1mb" })`.
+  - Verifies Stripe signatures via `constructVerifiedStripeEvent()` using `STRIPE_WEBHOOK_SECRET` and raw `Buffer` payload (`400 MISSING_STRIPE_SIGNATURE` / `INVALID_STRIPE_SIGNATURE`; `503 STRIPE_WEBHOOK_NOT_CONFIGURED` if secret missing).
+  - Supported events:
+    - `checkout.session.completed` (`payment_status === "paid"` -> `markSessionPaid`; `"unpaid"` -> `awaiting_async_payment` without marking paid).
+    - `checkout.session.async_payment_succeeded` -> `markSessionPaid`.
+    - `checkout.session.expired` -> `markSessionFailed` (`session_expired`).
+    - `checkout.session.async_payment_failed` -> `markSessionFailed` (`async_payment_failed`).
+  - Idempotency & integrity: repeated events are no-ops (`duplicate: true`), late failures/expirations never downgrade a `paid` transaction, amounts/currencies are cross-checked, `uniq_transactions_paid_appointment` prevents multiple `paid` transactions per appointment, and pending/cancelled appointments are never marked `paid`.
+
+### Step 5A Endpoints
+
+| Method | Path | Access | Contract Summary |
+|---|---|---|---|
+| `POST` | `/api/payments/checkout` | Customer (`checkoutRateLimiter`) | Creates (`201`) or reuses (`200`) Stripe test/live Checkout Session (`{ transactionId, appointmentId, sessionId, url, amount, currency, status, expiresAt, reused }`) |
+| `POST` | `/api/payments/webhook` | Stripe raw signature | Raw-body verified idempotent Stripe webhook (`200 { received, handled, eventType, outcome, duplicate }`) |
+| `GET` | `/api/payments/session/:sessionId` | Authenticated owner only (`403` otherwise) | Read-only safe payment & appointment status summary (`status`, `isFinal`, `amount`, `currency`, `appointment`) |
+| `GET` | `/api/transactions/my` | Customer | Own transactions paginated (`status` filter, `meta.counts`); never returns other customers' records |
+| `GET` | `/api/admin/transactions` | Admin (strictly read-only `GET` only) | All customer transactions with `status`, regex-escaped `search` (customer name/email, service, session ID), pagination, `meta.counts`, `meta.totalPaidRevenueCents` |
