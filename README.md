@@ -135,10 +135,10 @@ rup-chorcha-backend/
 Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, and register this redirect URI in Google Cloud Console:
 
 ```text
-<BETTER_AUTH_URL>/api/auth/callback/google
+<CLIENT_APP_URL>/api/auth/callback/google
 ```
 
-(Local default: `http://localhost:5000/api/auth/callback/google`, or your deployed domain when routed through a same-origin frontend proxy.)
+(Local default: `http://localhost:3000/api/auth/callback/google`; production: `https://rup-chorcha.vercel.app/api/auth/callback/google` — routed through the Next.js same-origin BFF callback.)
 
 ## Required Environment Variables
 
@@ -236,4 +236,5 @@ Standard JSON contract:
 
 - **Backend Repository:** https://github.com/devnajmulislam/rup-chorcha-backend
 - **Frontend Repository:** https://github.com/devnajmulislam/rup-chorcha
-- **Live Site:** Pending deployment
+- **Live Website:** https://rup-chorcha.vercel.app
+- **Live Backend API:** https://rup-chorcha-backend.vercel.app

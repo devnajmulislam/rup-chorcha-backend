@@ -306,8 +306,12 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 
 ---
 
-## 10. Step 6 Audit & Next Recommended Task
+## 10. Step 6 Audit & Step 7 Production Deployment
 
-- **Step 6 Backend Security & Regression Re-Verification:** Re-ran `npm test` (`24/24` tests passing across `5` suites) plus full-stack Step 6 E2E integration against Next.js `next start` (checking JWT verification, live `isBlocked` enforcement, RBAC isolation, `.strict()` validation, `escapeRegex()`, Helmet/CORS/rate limiting, and raw-body Stripe webhook verification with ephemeral signing secret). Zero backend code changes were needed.
-- **Known Local Env Limitation:** `STRIPE_WEBHOOK_SECRET` in local `.env` remains blank until `stripe listen` or the deployed Stripe Webhook endpoint secret is configured.
-- **Next Recommended Task:** **Step 7 — Production Deployment** (deploy Express API and Next.js client, configure production env vars + live Stripe webhook secret + Google OAuth callback URLs, seed production admin, and complete manual browser QA on the deployed app).
+- **Step 6 Backend Security & Regression Re-Verification:** Re-ran `npm test` (`24/24` tests passing across `5` suites) plus full-stack Step 6 E2E integration against Next.js `next start`.
+- **Step 7 Vercel Serverless Deployment:**
+  - Removed broken `export default app;` in `app.js` and added lazy-initialized serverless handler `api/index.js`, `vercel.json` (`builds` + `routes` routing `/(.*)` -> `/api/index.js`), and `.vercelignore`.
+  - Fixed Google OAuth `redirectURI` in `lib/auth.js` (`${env.clientBaseUrl}/api/auth/callback/google`) and added idempotent `scripts/seed-services.js` (`npm run seed:services`).
+  - **Live Backend URL:** `https://rup-chorcha-backend.vercel.app` (`/` -> `200`, `/api/health` -> `200 connected`, `/api/services` -> `200`, `/api/payments/webhook` -> `400 MISSING_STRIPE_SIGNATURE` confirming `STRIPE_WEBHOOK_SECRET` is configured).
+  - **Live Frontend URL:** `https://rup-chorcha.vercel.app` (`/`, `/services`, `/sign-in`, `/sign-up`, customer register/booking/cancel/profile/RBAC/logout verified live; `EXIT_PROD_QA=0`).
+  - **Remaining Manual Browser Checks:** Interactive Google OAuth consent flow, Stripe hosted test-card checkout submission, and production admin dashboard login in a browser.
