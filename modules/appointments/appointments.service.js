@@ -723,6 +723,7 @@ async function updateAdminAppointmentStatus({ appointmentId, status }) {
 }
 
 export {
+  ADMIN_CUSTOMER_LOOKUP_STAGE,
   ADMIN_SERVICE_LOOKUP_STAGES,
   SERVICE_SUMMARY_PROJECTION,
   cancelAdminAppointment,

@@ -12,12 +12,22 @@ import {
   authRateLimiter,
   globalRateLimiter,
 } from "./middleware/rateLimiter.js";
+import { createPaymentsController } from "./modules/payments/payments.controller.js";
 import { apiRouter, createApiRouter } from "./routes/index.js";
 import { ApiError } from "./utils/ApiError.js";
 import { sendSuccess } from "./utils/apiResponse.js";
 
-function createApp({ auth = getAuth(), uploadImage } = {}) {
+function createApp({
+  auth = getAuth(),
+  uploadImage,
+  stripeClient,
+  stripeWebhookSecret,
+} = {}) {
   const app = express();
+  const webhookController = createPaymentsController({
+    stripeClient,
+    stripeWebhookSecret,
+  });
 
   app.set("trust proxy", 1);
 
@@ -49,9 +59,14 @@ function createApp({ auth = getAuth(), uploadImage } = {}) {
   app.use("/api/auth", authRateLimiter);
   app.all("/api/auth/*splat", toNodeHandler(auth));
 
-  app.use("/api", globalRateLimiter);
+  // Mount Stripe webhook before global rate limiting and express.json() so raw Buffer signature verification stays intact.
+  app.post(
+    "/api/payments/webhook",
+    express.raw({ type: "application/json", limit: "1mb" }),
+    webhookController.handleStripeWebhook
+  );
 
-  // Phase 5 Stripe webhook raw-body route (/api/payments/webhook) will mount here before express.json().
+  app.use("/api", globalRateLimiter);
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
   app.use(cookieParser());
@@ -64,7 +79,12 @@ function createApp({ auth = getAuth(), uploadImage } = {}) {
     });
   });
 
-  app.use("/api", uploadImage ? createApiRouter({ uploadImage }) : apiRouter);
+  app.use(
+    "/api",
+    uploadImage || stripeClient
+      ? createApiRouter({ uploadImage, stripeClient })
+      : apiRouter
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

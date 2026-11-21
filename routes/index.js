@@ -2,17 +2,20 @@ import { Router } from "express";
 
 import { adminAppointmentsRouter } from "./admin.appointments.routes.js";
 import { createAdminServicesRouter } from "./admin.services.routes.js";
+import { adminTransactionsRouter } from "./admin.transactions.routes.js";
 import { createAdminUploadsRouter } from "./admin.uploads.routes.js";
 import { adminUsersRouter } from "./admin.users.routes.js";
 import { appointmentsRouter } from "./appointments.routes.js";
 import { dashboardRouter } from "./dashboard.routes.js";
 import { healthRouter } from "./health.routes.js";
 import { jwtRouter } from "./jwt.routes.js";
+import { createPaymentsRouter } from "./payments.routes.js";
 import { profileRouter } from "./profile.routes.js";
 import { createServicesRouter } from "./services.routes.js";
+import { transactionsRouter } from "./transactions.routes.js";
 import { createUploadsRouter } from "./uploads.routes.js";
 
-function createApiRouter({ uploadImage } = {}) {
+function createApiRouter({ uploadImage, stripeClient } = {}) {
   const router = Router();
 
   router.use("/health", healthRouter);
@@ -22,8 +25,11 @@ function createApiRouter({ uploadImage } = {}) {
   router.use("/uploads", createUploadsRouter({ uploadImage }));
   router.use("/services", createServicesRouter({ uploadImage }));
   router.use("/appointments", appointmentsRouter);
+  router.use("/payments", createPaymentsRouter({ stripeClient }));
+  router.use("/transactions", transactionsRouter);
   router.use("/admin/appointments", adminAppointmentsRouter);
   router.use("/admin/services", createAdminServicesRouter({ uploadImage }));
+  router.use("/admin/transactions", adminTransactionsRouter);
   router.use("/admin/uploads", createAdminUploadsRouter({ uploadImage }));
   router.use("/admin/users", adminUsersRouter);
 

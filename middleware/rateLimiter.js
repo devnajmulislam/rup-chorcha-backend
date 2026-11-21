@@ -35,4 +35,17 @@ const uploadRateLimiter = rateLimit({
   handler: rateLimitExceededHandler,
 });
 
-export { authRateLimiter, globalRateLimiter, uploadRateLimiter };
+const checkoutRateLimiter = rateLimit({
+  windowMs: env.checkoutRateLimitWindowMs,
+  limit: env.checkoutRateLimitMax,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: rateLimitExceededHandler,
+});
+
+export {
+  authRateLimiter,
+  checkoutRateLimiter,
+  globalRateLimiter,
+  uploadRateLimiter,
+};

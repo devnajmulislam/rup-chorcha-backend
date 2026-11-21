@@ -39,6 +39,16 @@ const legacyDbUri = process.env.DB_URI?.trim() || "";
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
 const imgbbApiKey = process.env.IMGBB_API_KEY?.trim() || "";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim() || "";
+const stripePublishableKey = process.env.STRIPE_PUBLISHABLE_KEY?.trim() || "";
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || "";
+const stripeCurrency = (process.env.STRIPE_CURRENCY?.trim() || "usd").toLowerCase();
+const allowedOrigins = parseAllowedOrigins(process.env.CLIENT_URL, isProduction);
+const clientBaseUrl = (
+  process.env.CLIENT_APP_URL?.trim() ||
+  allowedOrigins[0] ||
+  "http://localhost:3000"
+).replace(/\/+$/, "");
 const maxUploadMb = parsePositiveInt(
   process.env.MAX_UPLOAD_MB,
   5,
@@ -56,7 +66,8 @@ const env = Object.freeze({
   mongodbUri: primaryMongoUri || legacyDbUri,
   usedLegacyDbUri: Boolean(!primaryMongoUri && legacyDbUri),
   mongodbDbName: process.env.MONGODB_DB_NAME?.trim() || "rup-chorcha",
-  allowedOrigins: parseAllowedOrigins(process.env.CLIENT_URL, isProduction),
+  allowedOrigins,
+  clientBaseUrl,
   rateLimitWindowMs: parsePositiveInt(
     process.env.RATE_LIMIT_WINDOW_MS,
     15 * 60 * 1000,
@@ -87,8 +98,24 @@ const env = Object.freeze({
     isProduction ? 30 : 100,
     "UPLOAD_RATE_LIMIT_MAX"
   ),
+  checkoutRateLimitWindowMs: parsePositiveInt(
+    process.env.CHECKOUT_RATE_LIMIT_WINDOW_MS,
+    15 * 60 * 1000,
+    "CHECKOUT_RATE_LIMIT_WINDOW_MS"
+  ),
+  checkoutRateLimitMax: parsePositiveInt(
+    process.env.CHECKOUT_RATE_LIMIT_MAX,
+    isProduction ? 30 : 100,
+    "CHECKOUT_RATE_LIMIT_MAX"
+  ),
   imgbbApiKey,
   imgbbConfigured: Boolean(imgbbApiKey),
+  stripeSecretKey,
+  stripePublishableKey,
+  stripeWebhookSecret,
+  stripeCurrency,
+  stripeConfigured: Boolean(stripeSecretKey),
+  stripeWebhookConfigured: Boolean(stripeWebhookSecret),
   maxUploadMb,
   maxUploadBytes: maxUploadMb * 1024 * 1024,
   betterAuthSecret: process.env.BETTER_AUTH_SECRET?.trim() || "",
@@ -132,6 +159,26 @@ function validateEnv() {
 
   if (env.isProduction && !process.env.BETTER_AUTH_URL?.trim()) {
     issues.push("BETTER_AUTH_URL");
+  }
+
+  if (env.stripeCurrency !== "usd") {
+    issues.push("STRIPE_CURRENCY (only 'usd' is supported)");
+  }
+
+  if (
+    env.stripeSecretKey &&
+    !env.stripeSecretKey.startsWith("sk_") &&
+    !env.stripeSecretKey.startsWith("rk_")
+  ) {
+    issues.push("STRIPE_SECRET_KEY (must start with sk_ or rk_)");
+  }
+
+  if (env.stripePublishableKey && !env.stripePublishableKey.startsWith("pk_")) {
+    issues.push("STRIPE_PUBLISHABLE_KEY (must start with pk_)");
+  }
+
+  if (env.stripeWebhookSecret && !env.stripeWebhookSecret.startsWith("whsec_")) {
+    issues.push("STRIPE_WEBHOOK_SECRET (must start with whsec_)");
   }
 
   if (issues.length > 0) {

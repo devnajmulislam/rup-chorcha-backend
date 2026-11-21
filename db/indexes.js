@@ -71,6 +71,16 @@ const INDEX_DEFINITIONS = [
         unique: true,
         partialFilterExpression: { status: "paid" },
       },
+      {
+        key: { appointmentId: 1 },
+        name: "uniq_transactions_pending_appointment",
+        unique: true,
+        partialFilterExpression: { status: "pending" },
+      },
+      {
+        key: { createdAt: -1 },
+        name: "idx_transactions_created_at",
+      },
     ],
   },
 ];

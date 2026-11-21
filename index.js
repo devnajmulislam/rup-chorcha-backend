@@ -61,6 +61,15 @@ async function startServer() {
         : "not configured — set IMGBB_API_KEY"
     }.`
   );
+  console.log(
+    `Configured Stripe Checkout: ${
+      env.stripeConfigured ? `enabled (${env.stripeCurrency.toUpperCase()})` : "not configured — set STRIPE_SECRET_KEY"
+    } (webhook verification: ${
+      env.stripeWebhookConfigured
+        ? "enabled"
+        : "not configured — set STRIPE_WEBHOOK_SECRET"
+    }).`
+  );
 
   const app = createApp({ auth });
   server = app.listen(env.port, () => {
