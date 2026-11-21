@@ -93,4 +93,3 @@ function createApp({
 }
 
 export { createApp };
-export default app;
