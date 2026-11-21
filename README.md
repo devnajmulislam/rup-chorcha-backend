@@ -1,10 +1,10 @@
-# RupChorcha — Backend API
+# RupChorcha - Backend API
 
-Backend REST API server for the **RupChorcha** salon appointment booking platform (`Assignment 9 - Category 002`).
+Backend REST API server for the **RupChorcha** salon appointment booking platform.
 
 ## Project Status
 
-- **Implemented (Step 1 Part A, Step 1 Part B, Step 2A, Step 3A, Step 4A, and Step 5A):**
+- **Implemented:**
   - Express 5 application factory, environment validation, MongoDB Atlas connection & ping helper, idempotent collection index creation (`services`, `appointments`, `transactions`), Helmet security headers, credentialed CORS allowlist, global/auth/upload/checkout rate limiting, JSON/cookie/Multer/Stripe raw-body parsing, `GET /api/health`, JSON 404 handler, and central JSON error handler.
   - Better Auth mounted at `/api/auth/*splat` with MongoDB adapter, email/password authentication (minimum 6 chars with uppercase & lowercase enforcement), Google OAuth env support, server-enforced `role` (`customer` default on all public sign-ups) and `isBlocked` fields, `phone` field, blocked-user session hook, `jose` HS256 JWT issuance/verification (`POST /api/jwt/token`, `GET /api/jwt/me`), `requireAuth` / `requireRole` / `requireNotBlocked` middleware, and idempotent `npm run seed:admin`.
   - Public Services API (`GET /api/services`, `GET /api/services/:id`) with active-only enforcement, escaped search, category filtering, price/name/date sorting, and skip/limit pagination.
