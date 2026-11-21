@@ -303,3 +303,11 @@ Never place secret values into `AGENTS.md`, `README.md`, or `.env.example`.
 | `GET` | `/api/payments/session/:sessionId` | Authenticated owner only (`403` otherwise) | Read-only safe payment & appointment status summary (`status`, `isFinal`, `amount`, `currency`, `appointment`) |
 | `GET` | `/api/transactions/my` | Customer | Own transactions paginated (`status` filter, `meta.counts`); never returns other customers' records |
 | `GET` | `/api/admin/transactions` | Admin (strictly read-only `GET` only) | All customer transactions with `status`, regex-escaped `search` (customer name/email, service, session ID), pagination, `meta.counts`, `meta.totalPaidRevenueCents` |
+
+---
+
+## 10. Step 6 Audit & Next Recommended Task
+
+- **Step 6 Backend Security & Regression Re-Verification:** Re-ran `npm test` (`24/24` tests passing across `5` suites) plus full-stack Step 6 E2E integration against Next.js `next start` (checking JWT verification, live `isBlocked` enforcement, RBAC isolation, `.strict()` validation, `escapeRegex()`, Helmet/CORS/rate limiting, and raw-body Stripe webhook verification with ephemeral signing secret). Zero backend code changes were needed.
+- **Known Local Env Limitation:** `STRIPE_WEBHOOK_SECRET` in local `.env` remains blank until `stripe listen` or the deployed Stripe Webhook endpoint secret is configured.
+- **Next Recommended Task:** **Step 7 — Production Deployment** (deploy Express API and Next.js client, configure production env vars + live Stripe webhook secret + Google OAuth callback URLs, seed production admin, and complete manual browser QA on the deployed app).
